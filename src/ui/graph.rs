@@ -1,9 +1,16 @@
 //! 時系列の折れ線グラフ描画。
 
-use eframe::egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2};
+use eframe::egui::{
+    Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2,
+};
 
 pub const GRAPH_BG: Color32 = Color32::from_rgb(0x0e, 0x10, 0x13);
 const GRID: Color32 = Color32::from_rgb(0x26, 0x2a, 0x30);
+const LABEL: Color32 = Color32::from_rgb(0x9a, 0xa0, 0xa8);
+
+/// 小グラフ 1 つの最小幅。
+const CELL_MIN_W: f32 = 84.0;
+pub const CELL_GAP: f32 = 3.0;
 
 pub struct Series {
     /// 古い順の値。NaN は欠損（線を途切れさせる）。
@@ -29,8 +36,22 @@ impl Series {
 
 /// `rect` にグラフを描く。最新の値が右端に来て、`capacity` 個で全幅になる。
 pub fn draw(painter: &Painter, rect: Rect, series: &[Series], max: f32, capacity: usize, border: Color32) {
+    draw_with_grid(painter, rect, series, max, capacity, border, true);
+}
+
+fn draw_with_grid(
+    painter: &Painter,
+    rect: Rect,
+    series: &[Series],
+    max: f32,
+    capacity: usize,
+    border: Color32,
+    grid: bool,
+) {
     painter.rect_filled(rect, 0.0, GRAPH_BG);
-    draw_grid(painter, rect);
+    if grid {
+        draw_grid(painter, rect);
+    }
 
     let painter = painter.with_clip_rect(rect);
     let step = rect.width() / (capacity.max(2) - 1) as f32;
@@ -55,28 +76,51 @@ pub fn draw(painter: &Painter, rect: Rect, series: &[Series], max: f32, capacity
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, border), StrokeKind::Inside);
 }
 
-/// 小さなグラフを格子状に並べる（論理プロセッサ別 CPU など）。
-pub fn draw_cells(painter: &Painter, rect: Rect, cells: &[Vec<f32>], capacity: usize, color: Color32) {
-    let n = cells.len().max(1);
-    let aspect = (rect.width() / rect.height().max(1.0)).max(0.1);
-    let cols = ((n as f32 * aspect).sqrt().ceil() as usize).clamp(1, n);
-    let rows = n.div_ceil(cols);
-    let gap = 2.0;
-    let w = (rect.width() - gap * (cols - 1) as f32) / cols as f32;
-    let h = (rect.height() - gap * (rows - 1) as f32) / rows as f32;
+/// `n` 個の小グラフを幅 `width` に並べるときの (列数, 行数)。
+pub fn cell_grid(n: usize, width: f32) -> (usize, usize) {
+    let cols = (((width + CELL_GAP) / (CELL_MIN_W + CELL_GAP)).floor() as usize).clamp(1, n.max(1));
+    (cols, n.div_ceil(cols))
+}
+
+/// 小さなグラフを `cols` 列の格子状に並べる（スレッド別 CPU など）。
+/// 各セルの左上に番号、右上に現在値を表示する。
+pub fn draw_cells(
+    painter: &Painter,
+    rect: Rect,
+    cells: &[Vec<f32>],
+    cols: usize,
+    capacity: usize,
+    color: Color32,
+) {
+    let cols = cols.max(1);
+    let rows = cells.len().div_ceil(cols).max(1);
+    let w = (rect.width() - CELL_GAP * (cols - 1) as f32) / cols as f32;
+    let h = (rect.height() - CELL_GAP * (rows - 1) as f32) / rows as f32;
+    let font = FontId::proportional(10.0);
 
     for (i, values) in cells.iter().enumerate() {
         let (r, c) = (i / cols, i % cols);
-        let min = rect.min + eframe::egui::vec2(c as f32 * (w + gap), r as f32 * (h + gap));
-        let cell = Rect::from_min_size(min, eframe::egui::vec2(w, h));
-        draw(
+        let min = rect.min + vec2(c as f32 * (w + CELL_GAP), r as f32 * (h + CELL_GAP));
+        let cell = Rect::from_min_size(min, vec2(w, h));
+        draw_with_grid(
             painter,
             cell,
             &[Series::filled(values.clone(), color)],
             100.0,
             capacity,
             color.gamma_multiply(0.4),
+            false,
         );
+        painter.text(cell.left_top() + vec2(3.0, 1.0), Align2::LEFT_TOP, i.to_string(), font.clone(), LABEL);
+        if let Some(v) = values.last().filter(|v| v.is_finite()) {
+            painter.text(
+                cell.right_top() + vec2(-3.0, 1.0),
+                Align2::RIGHT_TOP,
+                format!("{v:.0}%"),
+                font.clone(),
+                LABEL,
+            );
+        }
     }
 }
 
@@ -118,5 +162,21 @@ fn draw_segment(painter: &Painter, rect: Rect, points: &[Pos2], series: &Series)
         painter.extend(Shape::dashed_line(points, stroke, 4.0, 3.0));
     } else {
         painter.add(Shape::line(points.to_vec(), stroke));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_grid_layout() {
+        // 16 スレッドを幅 184 に並べると 2 列 × 8 行
+        assert_eq!(cell_grid(16, 184.0), (2, 8));
+        // 狭くても最低 1 列
+        assert_eq!(cell_grid(4, 10.0), (1, 4));
+        // 列数はセル数を超えない
+        assert_eq!(cell_grid(2, 1000.0), (2, 1));
+        assert_eq!(cell_grid(0, 100.0), (1, 0));
     }
 }

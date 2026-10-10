@@ -40,7 +40,7 @@ impl Default for Config {
             borderless: false,
             opacity: 1.0,
             compact: false,
-            show_per_core_cpu: false,
+            show_per_core_cpu: true,
             hidden: BTreeSet::new(),
             window: None,
         }

@@ -15,7 +15,7 @@ fn main() -> eframe::Result {
 
     let viewport = egui::ViewportBuilder::default()
         .with_title("Performance Monitor")
-        .with_inner_size([720.0, 480.0])
+        .with_inner_size([1100.0, 640.0])
         .with_min_inner_size([240.0, 120.0])
         .with_transparent(true)
         .with_decorations(!config.borderless)

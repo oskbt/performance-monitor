@@ -38,15 +38,18 @@ const NETWORK_MIN_SCALE: f64 = 100_000.0;
 
 const NO_DATA: &str = "—";
 
-/// 表示する全タイル（非表示設定は適用しない）。
-pub fn build_tiles(history: &History, per_core_cpu: bool) -> Vec<Tile> {
-    let mut tiles = vec![cpu_tile(history, per_core_cpu), memory_tile(history)];
-    if let Some(latest) = history.latest() {
-        tiles.extend(latest.disks.iter().map(|d| disk_tile(history, d.index)));
-        tiles.extend(latest.networks.iter().map(|n| network_tile(history, &n.id)));
-        tiles.extend(latest.gpus.iter().map(|g| gpu_tile(history, g.luid)));
+/// 列ごとのタイル。左から CPU・メモリ・GPU・ディスク・ネットワーク（非表示設定は適用しない）。
+pub fn build_columns(history: &History, per_thread_cpu: bool) -> Vec<Vec<Tile>> {
+    let mut columns = vec![vec![cpu_tile(history, per_thread_cpu)], vec![memory_tile(history)]];
+    match history.latest() {
+        Some(latest) => {
+            columns.push(latest.gpus.iter().map(|g| gpu_tile(history, g.luid)).collect());
+            columns.push(latest.disks.iter().map(|d| disk_tile(history, d.index)).collect());
+            columns.push(latest.networks.iter().map(|n| network_tile(history, &n.id)).collect());
+        }
+        None => columns.extend([Vec::new(), Vec::new(), Vec::new()]),
     }
-    tiles
+    columns
 }
 
 /// 2 系列の速度グラフ（1 系列目を塗りつぶし、2 系列目を破線）。
@@ -72,33 +75,29 @@ fn rate_graph(
     }
 }
 
-fn cpu_tile(history: &History, per_core: bool) -> Tile {
+fn cpu_tile(history: &History, per_thread: bool) -> Tile {
     let latest = history.latest().and_then(|s| s.cpu.as_ref());
 
-    let cores = latest.map_or(0, |c| c.per_core.len());
-    let graph = if per_core && cores > 0 {
-        Graph::Cells(
-            (0..cores)
+    let mut graphs = vec![Graph::Lines {
+        series: vec![Series::filled(history.series(|s| s.cpu.as_ref().map(|c| c.usage)), CPU_COLOR)],
+        max: 100.0,
+        scale: None,
+    }];
+    let threads = latest.map_or(0, |c| c.per_core.len());
+    if per_thread && threads > 0 {
+        graphs.push(Graph::Cells(
+            (0..threads)
                 .map(|i| history.series(|s| s.cpu.as_ref()?.per_core.get(i).copied()))
                 .collect(),
-        )
-    } else {
-        Graph::Lines {
-            series: vec![Series::filled(
-                history.series(|s| s.cpu.as_ref().map(|c| c.usage)),
-                CPU_COLOR,
-            )],
-            max: 100.0,
-            scale: None,
-        }
-    };
+        ));
+    }
 
     Tile {
         id: "cpu".into(),
         title: "CPU".into(),
         value: latest.map_or(NO_DATA.into(), |c| format::percent(c.usage)),
         color: CPU_COLOR,
-        graphs: vec![graph],
+        graphs,
         legend: latest
             .and_then(|c| c.frequency_mhz)
             .map(|mhz| vec![(None, format!("速度 {}", format::ghz(mhz)))])
