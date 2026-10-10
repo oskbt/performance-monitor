@@ -14,8 +14,13 @@ pub const MEMORY_COLOR: Color32 = Color32::from_rgb(0xb0, 0x6c, 0xf0);
 pub const DISK_COLOR: Color32 = Color32::from_rgb(0x6c, 0xc0, 0x4a);
 const DISK_WRITE_COLOR: Color32 = Color32::from_rgb(0xd4, 0xe1, 0x57);
 
+pub const NETWORK_COLOR: Color32 = Color32::from_rgb(0xe0, 0x8e, 0x3c);
+const NETWORK_SEND_COLOR: Color32 = Color32::from_rgb(0xf5, 0xd0, 0x8a);
+
 /// ディスク速度グラフの縦軸の最小上限（1 MB/s）。
 const DISK_MIN_SCALE: f64 = 1024.0 * 1024.0;
+/// ネットワークグラフの縦軸の最小上限（100 Kbps）。
+const NETWORK_MIN_SCALE: f64 = 100_000.0;
 
 const NO_DATA: &str = "—";
 
@@ -24,6 +29,7 @@ pub fn build_tiles(history: &History, per_core_cpu: bool) -> Vec<Tile> {
     let mut tiles = vec![cpu_tile(history, per_core_cpu), memory_tile(history)];
     if let Some(latest) = history.latest() {
         tiles.extend(latest.disks.iter().map(|d| disk_tile(history, d.index)));
+        tiles.extend(latest.networks.iter().map(|n| network_tile(history, &n.id)));
     }
     tiles
 }
@@ -154,5 +160,44 @@ fn disk_tile(history: &History, index: u32) -> Tile {
             })
             .unwrap_or_default(),
         details: Vec::new(),
+    }
+}
+
+fn network_tile(history: &History, id: &str) -> Tile {
+    let find = |s: &crate::collector::Snapshot| s.networks.iter().find(|n| n.id == id).cloned();
+    let latest = history.latest().and_then(|s| find(s));
+
+    let graph = rate_graph(
+        history.series(|s| find(s).map(|n| n.received as f32)),
+        history.series(|s| find(s).map(|n| n.sent as f32)),
+        (NETWORK_COLOR, NETWORK_SEND_COLOR),
+        NETWORK_MIN_SCALE,
+        format::nice_ceiling,
+        format::bits_per_sec,
+    );
+
+    let mut details = Vec::new();
+    if let Some(n) = &latest {
+        details.push(n.description.clone());
+        if n.link_speed > 0 {
+            details.push(format!("リンク速度 {}", format::bits_per_sec(n.link_speed as f64)));
+        }
+    }
+
+    Tile {
+        id: format!("net:{id}"),
+        title: latest.as_ref().map_or_else(|| "ネットワーク".into(), |n| n.name.clone()),
+        value: String::new(),
+        color: NETWORK_COLOR,
+        graphs: vec![graph],
+        legend: latest
+            .map(|n| {
+                vec![
+                    (Some(NETWORK_COLOR), format!("受信 {}", format::bits_per_sec(n.received))),
+                    (Some(NETWORK_SEND_COLOR), format!("送信 {}", format::bits_per_sec(n.sent))),
+                ]
+            })
+            .unwrap_or_default(),
+        details,
     }
 }

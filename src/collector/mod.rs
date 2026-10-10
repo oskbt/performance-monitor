@@ -3,7 +3,9 @@
 mod cpu;
 mod disk;
 mod memory;
+mod network;
 mod pdh;
+mod registry;
 
 use crate::history::History;
 use eframe::egui;
@@ -14,6 +16,7 @@ use std::time::{Duration, Instant};
 pub use cpu::CpuSample;
 pub use disk::DiskSample;
 pub use memory::MemorySample;
+pub use network::NetworkSample;
 
 /// ある時点の全項目の値。
 #[derive(Debug, Default)]
@@ -21,11 +24,13 @@ pub struct Snapshot {
     pub cpu: Option<CpuSample>,
     pub memory: Option<MemorySample>,
     pub disks: Vec<DiskSample>,
+    pub networks: Vec<NetworkSample>,
 }
 
 struct Collectors {
     cpu: Option<cpu::CpuCollector>,
     disk: Option<disk::DiskCollector>,
+    network: network::NetworkCollector,
 }
 
 impl Collectors {
@@ -37,6 +42,7 @@ impl Collectors {
             disk: disk::DiskCollector::new()
                 .inspect_err(|e| log::error!("ディスク情報を取得できません: {e}"))
                 .ok(),
+            network: network::NetworkCollector::new(),
         }
     }
 
@@ -45,6 +51,7 @@ impl Collectors {
             cpu: self.cpu.as_mut().and_then(|c| c.sample()),
             memory: memory::sample(),
             disks: self.disk.as_mut().map(|c| c.sample()).unwrap_or_default(),
+            networks: self.network.sample(),
         }
     }
 }

@@ -1,7 +1,6 @@
 use super::pdh::{Counter, PdhError, Query};
+use super::registry;
 use std::sync::Arc;
-use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
-use windows::core::w;
 
 #[derive(Debug, Clone)]
 pub struct CpuSample {
@@ -83,25 +82,12 @@ fn parse_core_instance(name: &str) -> Option<(u32, u32)> {
 }
 
 fn processor_name() -> Option<String> {
-    let mut buf = [0u16; 256];
-    let mut size = std::mem::size_of_val(&buf) as u32;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            w!(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"),
-            w!("ProcessorNameString"),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if status.is_err() {
-        return None;
-    }
-    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    let name = String::from_utf16_lossy(&buf[..len]).trim().to_string();
-    (!name.is_empty()).then_some(name)
+    let name = registry::read_string(
+        r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+        "ProcessorNameString",
+    )?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 #[cfg(test)]
