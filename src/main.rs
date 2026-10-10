@@ -8,6 +8,7 @@ mod icon;
 mod tray;
 mod ui;
 mod config;
+mod fonts;
 mod winutil;
 
 use eframe::egui;
