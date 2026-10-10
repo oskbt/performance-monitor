@@ -5,6 +5,7 @@ pub mod graph;
 pub mod tile;
 
 use crate::collector::EngineKind;
+use crate::config::Config;
 use crate::history::History;
 use eframe::egui::Color32;
 use graph::Series;
@@ -39,11 +40,15 @@ const NETWORK_MIN_SCALE: f64 = 100_000.0;
 const NO_DATA: &str = "—";
 
 /// 列ごとのタイル。左から CPU・メモリ・GPU・ディスク・ネットワーク（非表示設定は適用しない）。
-pub fn build_columns(history: &History, per_thread_cpu: bool) -> Vec<Vec<Tile>> {
-    let mut columns = vec![vec![cpu_tile(history, per_thread_cpu)], vec![memory_tile(history)]];
+pub fn build_columns(history: &History, config: &Config) -> Vec<Vec<Tile>> {
+    let mut columns =
+        vec![vec![cpu_tile(history, config.show_per_core_cpu)], vec![memory_tile(history)]];
+    let temp_thresholds = (config.gpu_temp_warning, config.gpu_temp_danger);
     match history.latest() {
         Some(latest) => {
-            columns.push(latest.gpus.iter().map(|g| gpu_tile(history, g.luid)).collect());
+            columns.push(
+                latest.gpus.iter().map(|g| gpu_tile(history, g.luid, temp_thresholds)).collect(),
+            );
             columns.push(latest.disks.iter().map(|d| disk_tile(history, d.index)).collect());
             columns.push(latest.networks.iter().map(|n| network_tile(history, &n.id)).collect());
         }
@@ -103,6 +108,7 @@ fn cpu_tile(history: &History, per_thread: bool) -> Tile {
             .map(|mhz| vec![(None, format!("速度 {}", format::ghz(mhz)))])
             .unwrap_or_default(),
         details: latest.map(|c| vec![c.name.to_string()]).unwrap_or_default(),
+        alert: false,
     }
 }
 
@@ -134,6 +140,7 @@ fn memory_tile(history: &History) -> Tile {
             .map(|m| vec![(None, format!("使用中 {}", format::gb_pair(m.used, m.total)))])
             .unwrap_or_default(),
         details,
+        alert: false,
     }
 }
 
@@ -174,6 +181,7 @@ fn disk_tile(history: &History, index: u32) -> Tile {
             })
             .unwrap_or_default(),
         details: Vec::new(),
+        alert: false,
     }
 }
 
@@ -213,10 +221,14 @@ fn network_tile(history: &History, id: &str) -> Tile {
             })
             .unwrap_or_default(),
         details,
+        alert: false,
     }
 }
 
-fn gpu_tile(history: &History, luid: (u32, u32)) -> Tile {
+/// GPU 温度メーターの上限 (℃)。
+const GPU_TEMP_MAX: f32 = 100.0;
+
+fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) -> Tile {
     let find = |s: &crate::collector::Snapshot| s.gpus.iter().find(|g| g.luid == luid).cloned();
     let latest = history.latest().and_then(|s| find(s));
     let kinds: Vec<EngineKind> =
@@ -255,7 +267,20 @@ fn gpu_tile(history: &History, luid: (u32, u32)) -> Tile {
             .map_or_else(|| "GPU".into(), |g| format!("GPU {} ({})", g.index, g.name)),
         value: latest.as_ref().map_or(NO_DATA.into(), |g| format::percent(g.usage)),
         color: GPU_COLOR,
-        graphs: vec![Graph::Lines { series, max: 100.0, scale: None }],
+        graphs: vec![
+            Graph::Lines { series, max: 100.0, scale: None },
+            Graph::Meter {
+                label: "温度".into(),
+                value: latest.as_ref().and_then(|g| g.temperature),
+                max: GPU_TEMP_MAX,
+                thresholds: temp_thresholds,
+                unit: "℃",
+            },
+        ],
+        alert: latest
+            .as_ref()
+            .and_then(|g| g.temperature)
+            .is_some_and(|t| t >= temp_thresholds.1),
         legend: latest
             .map(|g| {
                 g.engines

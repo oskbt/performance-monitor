@@ -124,6 +124,50 @@ pub fn draw_cells(
     }
 }
 
+pub const METER_OK: Color32 = Color32::from_rgb(0x5c, 0xb8, 0x5c);
+pub const METER_WARNING: Color32 = Color32::from_rgb(0xf0, 0xad, 0x4e);
+pub const METER_DANGER: Color32 = Color32::from_rgb(0xe5, 0x53, 0x4b);
+
+/// しきい値に応じたメーターの色。
+pub fn meter_color(value: f32, warning: f32, danger: f32) -> Color32 {
+    if value >= danger {
+        METER_DANGER
+    } else if value >= warning {
+        METER_WARNING
+    } else {
+        METER_OK
+    }
+}
+
+/// 横棒のメーター。`warning` / `danger` の位置に目盛りを描き、値に応じて色を変える。
+/// `value` が None なら「取得不可」と表示する。
+pub fn draw_meter(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    value: Option<f32>,
+    max: f32,
+    (warning, danger): (f32, f32),
+    unit: &str,
+) {
+    painter.rect_filled(rect, 2.0, GRAPH_BG);
+    let x_at = |v: f32| rect.left() + rect.width() * (v / max).clamp(0.0, 1.0);
+
+    if let Some(v) = value {
+        let fill = Rect::from_min_max(rect.min, pos2(x_at(v), rect.bottom()));
+        painter.rect_filled(fill, 2.0, meter_color(v, warning, danger).gamma_multiply(0.75));
+    }
+    for (threshold, color) in [(warning, METER_WARNING), (danger, METER_DANGER)] {
+        painter.vline(x_at(threshold), rect.y_range(), Stroke::new(1.0, color));
+    }
+
+    let font = FontId::proportional(11.0);
+    let text = Color32::from_rgb(0xf0, 0xf2, 0xf4);
+    painter.text(rect.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, label, font.clone(), text);
+    let value_text = value.map_or_else(|| "取得不可".to_string(), |v| format!("{v:.0}{unit}"));
+    painter.text(rect.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, value_text, font, text);
+}
+
 fn draw_grid(painter: &Painter, rect: Rect) {
     let stroke = Stroke::new(1.0, GRID);
     for i in 1..4 {
@@ -178,5 +222,12 @@ mod tests {
         // 列数はセル数を超えない
         assert_eq!(cell_grid(2, 1000.0), (2, 1));
         assert_eq!(cell_grid(0, 100.0), (1, 0));
+    }
+
+    #[test]
+    fn meter_thresholds() {
+        assert_eq!(meter_color(50.0, 80.0, 90.0), METER_OK);
+        assert_eq!(meter_color(80.0, 80.0, 90.0), METER_WARNING);
+        assert_eq!(meter_color(95.0, 80.0, 90.0), METER_DANGER);
     }
 }

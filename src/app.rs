@@ -127,7 +127,7 @@ impl eframe::App for MonitorApp {
         let (columns, capacity) = {
             let mut history = self.history.lock().unwrap();
             history.set_capacity(self.config.history_len());
-            (ui::build_columns(&history, self.config.show_per_core_cpu), history.capacity())
+            (ui::build_columns(&history, &self.config), history.capacity())
         };
         self.all_tiles =
             columns.iter().flatten().map(|t| (t.id.clone(), t.title.clone())).collect();

@@ -1,5 +1,11 @@
 use super::pdh::{Counter, PdhError, Query};
 use std::collections::HashMap;
+use windows::Wdk::Graphics::Direct3D::{
+    D3DKMT_ADAPTER_PERFDATA, D3DKMT_CLOSEADAPTER, D3DKMT_OPENADAPTERFROMLUID,
+    D3DKMT_QUERYADAPTERINFO, D3DKMTCloseAdapter, D3DKMTOpenAdapterFromLuid,
+    D3DKMTQueryAdapterInfo, KMTQAITYPE_ADAPTERPERFDATA,
+};
+use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIFactory1,
 };
@@ -61,6 +67,8 @@ pub struct GpuSample {
     pub dedicated_total: u64,
     pub shared_used: u64,
     pub shared_total: u64,
+    /// GPU 温度 (℃)。ドライバが報告しない場合は None。
+    pub temperature: Option<f32>,
 }
 
 struct Adapter {
@@ -68,6 +76,43 @@ struct Adapter {
     name: String,
     dedicated_total: u64,
     shared_total: u64,
+    /// 温度取得用の D3DKMT アダプタハンドル。
+    kmt: Option<KmtAdapter>,
+}
+
+/// D3DKMT のアダプタハンドル（タスクマネージャーと同じ方法で温度を取得する）。
+struct KmtAdapter(u32);
+
+impl KmtAdapter {
+    fn open(luid: Luid) -> Option<Self> {
+        let mut open = D3DKMT_OPENADAPTERFROMLUID {
+            AdapterLuid: LUID { HighPart: luid.0 as i32, LowPart: luid.1 },
+            hAdapter: 0,
+        };
+        unsafe { D3DKMTOpenAdapterFromLuid(&mut open) }.ok().ok()?;
+        Some(Self(open.hAdapter))
+    }
+
+    /// 温度 (℃)。ドライバは 0.1℃ 単位で返す。0 は未対応を意味する。
+    fn temperature(&self) -> Option<f32> {
+        let mut data = D3DKMT_ADAPTER_PERFDATA::default();
+        let mut query = D3DKMT_QUERYADAPTERINFO {
+            hAdapter: self.0,
+            Type: KMTQAITYPE_ADAPTERPERFDATA,
+            pPrivateDriverData: (&mut data as *mut D3DKMT_ADAPTER_PERFDATA).cast(),
+            PrivateDriverDataSize: size_of::<D3DKMT_ADAPTER_PERFDATA>() as u32,
+        };
+        unsafe { D3DKMTQueryAdapterInfo(&mut query) }.ok().ok()?;
+        (data.Temperature > 0).then(|| data.Temperature as f32 / 10.0)
+    }
+}
+
+impl Drop for KmtAdapter {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = D3DKMTCloseAdapter(&D3DKMT_CLOSEADAPTER { hAdapter: self.0 });
+        }
+    }
 }
 
 pub struct GpuCollector {
@@ -138,6 +183,7 @@ impl GpuCollector {
                     dedicated_total: adapter.dedicated_total,
                     shared_used: shared.get(&adapter.luid).copied().unwrap_or(0),
                     shared_total: adapter.shared_total,
+                    temperature: adapter.kmt.as_ref().and_then(|k| k.temperature()),
                 }
             })
             .collect()
@@ -177,6 +223,7 @@ fn enumerate_adapters() -> windows::core::Result<Vec<Adapter>> {
             name: String::from_utf16_lossy(&desc.Description[..len]).trim().to_string(),
             dedicated_total: desc.DedicatedVideoMemory as u64,
             shared_total: desc.SharedSystemMemory as u64,
+            kmt: KmtAdapter::open(luid),
         });
     }
     Ok(adapters)

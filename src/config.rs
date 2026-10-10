@@ -17,6 +17,10 @@ pub struct Config {
     pub opacity: f32,
     pub compact: bool,
     pub show_per_core_cpu: bool,
+    /// GPU 温度の警告しきい値 (℃)。メーターが黄色になる。
+    pub gpu_temp_warning: f32,
+    /// GPU 温度の危険しきい値 (℃)。メーターとタイルの枠が赤になる。
+    pub gpu_temp_danger: f32,
     /// 非表示にしたタイルの ID。
     pub hidden: BTreeSet<String>,
     /// 前回終了時のウィンドウ位置・サイズ（物理ピクセル）。
@@ -41,6 +45,8 @@ impl Default for Config {
             opacity: 1.0,
             compact: false,
             show_per_core_cpu: true,
+            gpu_temp_warning: 80.0,
+            gpu_temp_danger: 90.0,
             hidden: BTreeSet::new(),
             window: None,
         }
@@ -90,6 +96,8 @@ impl Config {
         }
         self.history_seconds = self.history_seconds.clamp(10, 600);
         self.opacity = self.opacity.clamp(0.3, 1.0);
+        self.gpu_temp_danger = self.gpu_temp_danger.clamp(30.0, 150.0);
+        self.gpu_temp_warning = self.gpu_temp_warning.clamp(30.0, self.gpu_temp_danger);
     }
 
     /// グラフに保持するサンプル数。
@@ -125,6 +133,11 @@ mod tests {
         config.sanitize();
         assert_eq!(config.update_interval_ms, 1000);
         assert_eq!(config.opacity, 0.3);
+
+        let mut config: Config =
+            toml::from_str("gpu_temp_warning = 95.0\ngpu_temp_danger = 85.0").unwrap();
+        config.sanitize();
+        assert_eq!(config.gpu_temp_warning, 85.0);
     }
 
     #[test]

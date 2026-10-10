@@ -18,6 +18,7 @@ const GRAPH_H_COMPACT: f32 = 34.0;
 /// スレッド別などの小グラフ 1 つ分の高さ。
 const CELL_H: f32 = 40.0;
 const CELL_H_COMPACT: f32 = 26.0;
+const METER_H: f32 = 16.0;
 const LINE_H: f32 = 16.0;
 const GAP: f32 = 4.0;
 const MARKER_W: f32 = 12.0;
@@ -32,6 +33,15 @@ pub enum Graph {
     Lines { series: Vec<Series>, max: f32, scale: Option<String> },
     /// 系列ごとに小さなグラフを格子状に並べる（0〜100%）。各セルに番号と現在値を表示する。
     Cells(Vec<Vec<f32>>),
+    /// 横棒のメーター（温度など）。コンパクト表示でも表示する。
+    Meter {
+        label: String,
+        value: Option<f32>,
+        max: f32,
+        /// (警告, 危険) のしきい値。
+        thresholds: (f32, f32),
+        unit: &'static str,
+    },
 }
 
 pub struct Tile {
@@ -47,6 +57,8 @@ pub struct Tile {
     pub legend: Vec<(Option<Color32>, String)>,
     /// 補助情報。コンパクト表示では省略する。
     pub details: Vec<String>,
+    /// 危険な状態（温度超過など）。枠を赤く強調する。
+    pub alert: bool,
 }
 
 impl Tile {
@@ -97,6 +109,7 @@ impl Tile {
                         let (_, rows) = graph::cell_grid(cells.len(), width);
                         rows as f32 * (cell_h + graph::CELL_GAP) - graph::CELL_GAP
                     }
+                    Graph::Meter { .. } => METER_H,
                     Graph::Lines { .. } if i == 0 => base,
                     Graph::Lines { .. } if compact => return None,
                     Graph::Lines { .. } => base * 0.6,
@@ -110,13 +123,12 @@ impl Tile {
         let response = ui.interact(rect, ui.id().with(&self.id), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
 
-        painter.rect(
-            rect,
-            CornerRadius::same(4),
-            TILE_BG,
-            Stroke::new(1.0, self.color.gamma_multiply(0.35)),
-            StrokeKind::Inside,
-        );
+        let border = if self.alert {
+            Stroke::new(2.0, graph::METER_DANGER)
+        } else {
+            Stroke::new(1.0, self.color.gamma_multiply(0.35))
+        };
+        painter.rect(rect, CornerRadius::same(4), TILE_BG, border, StrokeKind::Inside);
 
         let inner = rect.shrink(PAD);
 
@@ -194,6 +206,9 @@ impl Tile {
             Graph::Cells(cells) => {
                 let (cols, _) = graph::cell_grid(cells.len(), rect.width());
                 graph::draw_cells(painter, rect, cells, cols, capacity, self.color);
+            }
+            Graph::Meter { label, value, max, thresholds, unit } => {
+                graph::draw_meter(painter, rect, label, *value, *max, *thresholds, unit);
             }
         }
     }
