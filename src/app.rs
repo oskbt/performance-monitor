@@ -12,7 +12,8 @@ use windows::Win32::Foundation::HWND;
 
 /// 背景色（ダークテーマ固定）。
 const BG: Color32 = Color32::from_rgb(0x16, 0x18, 0x1c);
-const MIN_TILE_W: f32 = 220.0;
+/// 列の最小幅。ウィンドウがこれより狭いと横スクロールになる。
+const MIN_COLUMN_W: f32 = 190.0;
 const TILE_GAP: f32 = 6.0;
 /// 枠なし時にリサイズ操作を受け付けるウィンドウ端の幅。
 const RESIZE_MARGIN: f32 = 6.0;
@@ -71,7 +72,7 @@ impl MonitorApp {
                 self.config.hidden.clear();
             }
         });
-        ui.checkbox(&mut self.config.show_per_core_cpu, "CPU を論理プロセッサごとに表示");
+        ui.checkbox(&mut self.config.show_per_core_cpu, "CPU をスレッドごとに表示");
         ui.checkbox(&mut self.config.compact, "コンパクト表示");
         ui.separator();
 
@@ -123,14 +124,20 @@ impl eframe::App for MonitorApp {
         }
         self.interval_ms.store(self.config.update_interval_ms, Ordering::Relaxed);
 
-        let (tiles, capacity) = {
+        let (columns, capacity) = {
             let mut history = self.history.lock().unwrap();
             history.set_capacity(self.config.history_len());
-            (ui::build_tiles(&history, self.config.show_per_core_cpu), history.capacity())
+            (ui::build_columns(&history, self.config.show_per_core_cpu), history.capacity())
         };
-        self.all_tiles = tiles.iter().map(|t| (t.id.clone(), t.title.clone())).collect();
-        let visible: Vec<_> =
-            tiles.into_iter().filter(|t| !self.config.hidden.contains(&t.id)).collect();
+        self.all_tiles =
+            columns.iter().flatten().map(|t| (t.id.clone(), t.title.clone())).collect();
+        let visible: Vec<Vec<_>> = columns
+            .into_iter()
+            .map(|column| {
+                column.into_iter().filter(|t| !self.config.hidden.contains(&t.id)).collect::<Vec<_>>()
+            })
+            .filter(|column| !column.is_empty())
+            .collect();
 
         let resizing = self.config.borderless && handle_borderless_resize(ctx);
         let compact = self.config.compact;
@@ -158,31 +165,42 @@ impl eframe::App for MonitorApp {
                     return;
                 }
 
-                egui::ScrollArea::vertical()
+                egui::ScrollArea::both()
                     .auto_shrink(false)
                     .scroll_source(egui::scroll_area::ScrollSource {
                         drag: false,
                         ..Default::default()
                     })
                     .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = vec2(TILE_GAP, TILE_GAP);
+                        let n = visible.len();
                         let avail = ui.available_width();
-                        let cols = (((avail + TILE_GAP) / (MIN_TILE_W + TILE_GAP)).floor() as usize)
-                            .max(1);
-                        let tile_w = (avail - TILE_GAP * (cols - 1) as f32) / cols as f32;
+                        let column_w = ((avail - TILE_GAP * (n - 1) as f32) / n as f32)
+                            .max(MIN_COLUMN_W);
 
-                        for row in visible.chunks(cols) {
-                            let row_h = row
-                                .iter()
-                                .map(|t| t.height(ui.painter(), compact, tile_w))
-                                .fold(0.0, f32::max);
-                            let (row_rect, _) =
-                                ui.allocate_exact_size(vec2(avail, row_h), egui::Sense::hover());
-                            for (i, tile) in row.iter().enumerate() {
-                                let rect = Rect::from_min_size(
-                                    row_rect.min + vec2(i as f32 * (tile_w + TILE_GAP), 0.0),
-                                    vec2(tile_w, row_h),
-                                );
+                        // 列ごとにタイルを縦に積む
+                        let heights: Vec<Vec<f32>> = visible
+                            .iter()
+                            .map(|column| {
+                                column
+                                    .iter()
+                                    .map(|t| t.height(ui.painter(), compact, column_w))
+                                    .collect()
+                            })
+                            .collect();
+                        let total_h = heights
+                            .iter()
+                            .map(|hs| hs.iter().sum::<f32>() + TILE_GAP * (hs.len() - 1) as f32)
+                            .fold(0.0, f32::max);
+                        let total_w = column_w * n as f32 + TILE_GAP * (n - 1) as f32;
+                        let (area, _) =
+                            ui.allocate_exact_size(vec2(total_w, total_h), egui::Sense::hover());
+
+                        for (i, (column, hs)) in visible.iter().zip(&heights).enumerate() {
+                            let x = area.left() + i as f32 * (column_w + TILE_GAP);
+                            let mut y = area.top();
+                            for (tile, &h) in column.iter().zip(hs) {
+                                let rect = Rect::from_min_size(egui::pos2(x, y), vec2(column_w, h));
+                                y += h + TILE_GAP;
                                 let response = tile.draw(ui, rect, compact, capacity);
                                 if response.drag_started() && self.config.borderless && !resizing {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);

@@ -15,6 +15,9 @@ const PAD: f32 = 8.0;
 const HEADER_H: f32 = 22.0;
 const GRAPH_H: f32 = 70.0;
 const GRAPH_H_COMPACT: f32 = 34.0;
+/// スレッド別などの小グラフ 1 つ分の高さ。
+const CELL_H: f32 = 40.0;
+const CELL_H_COMPACT: f32 = 26.0;
 const LINE_H: f32 = 16.0;
 const GAP: f32 = 4.0;
 const MARKER_W: f32 = 12.0;
@@ -27,7 +30,7 @@ fn legend_font() -> FontId {
 pub enum Graph {
     /// 1 つのグラフに複数系列を重ねる。`scale` は縦軸上限のラベル。
     Lines { series: Vec<Series>, max: f32, scale: Option<String> },
-    /// 系列ごとに小さなグラフを格子状に並べる（0〜100%）。
+    /// 系列ごとに小さなグラフを格子状に並べる（0〜100%）。各セルに番号と現在値を表示する。
     Cells(Vec<Vec<f32>>),
 }
 
@@ -38,7 +41,7 @@ pub struct Tile {
     /// 右上に大きく表示する現在値。
     pub value: String,
     pub color: Color32,
-    /// 上から順に描くグラフ。2 つ目以降は小さめに描き、コンパクト表示では省略する。
+    /// 上から順に描くグラフ。2 つ目以降の折れ線グラフは小さめに描き、コンパクト表示では省略する。
     pub graphs: Vec<Graph>,
     /// グラフ下の 1 行（凡例・主要な数値）。コンパクト表示でも表示する。
     pub legend: Vec<(Option<Color32>, String)>,
@@ -49,7 +52,8 @@ pub struct Tile {
 impl Tile {
     /// 幅 `width` で描いたときに必要な高さ。
     pub fn height(&self, painter: &egui::Painter, compact: bool, width: f32) -> f32 {
-        let graphs_h: f32 = self.graph_heights(compact).iter().map(|h| h + GAP).sum();
+        let graphs_h: f32 =
+            self.graph_layout(compact, width - 2.0 * PAD).iter().map(|(_, h)| h + GAP).sum();
         let mut h = PAD + HEADER_H + graphs_h - GAP + PAD;
         if let Some(rows) = self.legend_layout(painter, width - 2.0 * PAD).last().map(|e| e.0 + 1) {
             h += GAP + rows as f32 * LINE_H;
@@ -80,16 +84,24 @@ impl Tile {
             .collect()
     }
 
-    fn graph_heights(&self, compact: bool) -> Vec<f32> {
+    /// 描くグラフとその高さ。`width` はタイル内側の幅。
+    fn graph_layout(&self, compact: bool, width: f32) -> Vec<(&Graph, f32)> {
         let base = if compact { GRAPH_H_COMPACT } else { GRAPH_H };
+        let cell_h = if compact { CELL_H_COMPACT } else { CELL_H };
         self.graphs
             .iter()
-            .take(if compact { 1 } else { usize::MAX })
             .enumerate()
-            .map(|(i, g)| match (i, g) {
-                (_, Graph::Cells(_)) => base * 1.6,
-                (0, _) => base,
-                _ => base * 0.6,
+            .filter_map(|(i, g)| {
+                let h = match g {
+                    Graph::Cells(cells) => {
+                        let (_, rows) = graph::cell_grid(cells.len(), width);
+                        rows as f32 * (cell_h + graph::CELL_GAP) - graph::CELL_GAP
+                    }
+                    Graph::Lines { .. } if i == 0 => base,
+                    Graph::Lines { .. } if compact => return None,
+                    Graph::Lines { .. } => base * 0.6,
+                };
+                Some((g, h))
             })
             .collect()
     }
@@ -124,13 +136,13 @@ impl Tile {
             TEXT,
         );
 
-        // グラフ（行の高さが揃えられて余った分は 1 つ目のグラフに回す）
-        let mut heights = self.graph_heights(compact);
-        if let Some(first) = heights.first_mut() {
+        // グラフ（割り当てられた高さが必要より大きい場合、余りは 1 つ目のグラフに回す）
+        let mut layout = self.graph_layout(compact, inner.width());
+        if let Some((_, first)) = layout.first_mut() {
             *first += (rect.height() - self.height(&painter, compact, rect.width())).max(0.0);
         }
         let mut y = inner.top() + HEADER_H;
-        for (graph, h) in self.graphs.iter().zip(heights) {
+        for (graph, h) in layout {
             let graph_rect = Rect::from_min_size(egui::pos2(inner.left(), y), vec2(inner.width(), h));
             self.draw_graph(&painter, graph_rect, graph, capacity);
             y += h + GAP;
@@ -179,7 +191,10 @@ impl Tile {
                     );
                 }
             }
-            Graph::Cells(cells) => graph::draw_cells(painter, rect, cells, capacity, self.color),
+            Graph::Cells(cells) => {
+                let (cols, _) = graph::cell_grid(cells.len(), rect.width());
+                graph::draw_cells(painter, rect, cells, cols, capacity, self.color);
+            }
         }
     }
 }
