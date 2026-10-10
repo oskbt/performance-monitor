@@ -112,6 +112,7 @@ fn cpu_tile(history: &History, per_thread: bool) -> Tile {
             .unwrap_or_default(),
         details: latest.map(|c| vec![c.name.to_string()]).unwrap_or_default(),
         alert: false,
+        slim: false,
     }
 }
 
@@ -144,6 +145,7 @@ fn memory_tile(history: &History) -> Tile {
             .unwrap_or_default(),
         details,
         alert: false,
+        slim: false,
     }
 }
 
@@ -197,6 +199,7 @@ fn paging_tile(history: &History) -> Tile {
             .unwrap_or_default(),
         details,
         alert: false,
+        slim: false,
     }
 }
 
@@ -238,6 +241,7 @@ fn disk_tile(history: &History, index: u32) -> Tile {
             .unwrap_or_default(),
         details: Vec::new(),
         alert: false,
+        slim: true,
     }
 }
 
@@ -278,6 +282,7 @@ fn network_tile(history: &History, id: &str) -> Tile {
             .unwrap_or_default(),
         details,
         alert: false,
+        slim: false,
     }
 }
 
@@ -333,6 +338,7 @@ fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) ->
                 unit: "℃",
             },
         ],
+        slim: false,
         alert: latest
             .as_ref()
             .and_then(|g| g.temperature)

@@ -59,6 +59,8 @@ pub struct Tile {
     pub details: Vec<String>,
     /// 危険な状態（温度超過など）。枠を赤く強調する。
     pub alert: bool,
+    /// グラフを細く（スレッド別グラフと同じ高さで）描く。項目が多い列を 1 画面に収めるため。
+    pub slim: bool,
 }
 
 impl Tile {
@@ -109,6 +111,7 @@ impl Tile {
                         cells.len() as f32 * (cell_h + graph::CELL_GAP) - graph::CELL_GAP
                     }
                     Graph::Meter { .. } => METER_H,
+                    Graph::Lines { .. } if self.slim && (i == 0 || !compact) => cell_h,
                     Graph::Lines { .. } if i == 0 => base,
                     Graph::Lines { .. } if compact => return None,
                     Graph::Lines { .. } => base * 0.6,
