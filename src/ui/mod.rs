@@ -13,6 +13,7 @@ use tile::{Graph, Tile};
 
 pub const CPU_COLOR: Color32 = Color32::from_rgb(0x3d, 0xa5, 0xf4);
 pub const MEMORY_COLOR: Color32 = Color32::from_rgb(0xb0, 0x6c, 0xf0);
+const PAGE_OUT_COLOR: Color32 = Color32::from_rgb(0xe6, 0xb8, 0xf5);
 pub const DISK_COLOR: Color32 = Color32::from_rgb(0x6c, 0xc0, 0x4a);
 const DISK_WRITE_COLOR: Color32 = Color32::from_rgb(0xd4, 0xe1, 0x57);
 
@@ -41,8 +42,10 @@ const NO_DATA: &str = "—";
 
 /// 列ごとのタイル。左から CPU・メモリ・GPU・ディスク・ネットワーク（非表示設定は適用しない）。
 pub fn build_columns(history: &History, config: &Config) -> Vec<Vec<Tile>> {
-    let mut columns =
-        vec![vec![cpu_tile(history, config.show_per_core_cpu)], vec![memory_tile(history)]];
+    let mut columns = vec![
+        vec![cpu_tile(history, config.show_per_core_cpu)],
+        vec![memory_tile(history), paging_tile(history)],
+    ];
     let temp_thresholds = (config.gpu_temp_warning, config.gpu_temp_danger);
     match history.latest() {
         Some(latest) => {
@@ -138,6 +141,59 @@ fn memory_tile(history: &History) -> Tile {
         }],
         legend: latest
             .map(|m| vec![(None, format!("使用中 {}", format::gb_pair(m.used, m.total)))])
+            .unwrap_or_default(),
+        details,
+        alert: false,
+    }
+}
+
+fn paging_tile(history: &History) -> Tile {
+    let latest = history.latest().and_then(|s| s.paging.as_ref());
+
+    let usage = Graph::Lines {
+        series: vec![Series::filled(
+            history.series(|s| s.paging.as_ref()?.usage),
+            MEMORY_COLOR,
+        )],
+        max: 100.0,
+        scale: None,
+    };
+    let rates = rate_graph(
+        history.series(|s| s.paging.as_ref().map(|p| p.input as f32)),
+        history.series(|s| s.paging.as_ref().map(|p| p.output as f32)),
+        (MEMORY_COLOR, PAGE_OUT_COLOR),
+        DISK_MIN_SCALE,
+        format::nice_bytes_ceiling,
+        format::bytes_per_sec,
+    );
+
+    let mut details = Vec::new();
+    if let Some(p) = latest {
+        details.push(match p.usage {
+            Some(usage) if p.pagefile_total > 0 => format!(
+                "ページファイル {}",
+                format::gb_pair(
+                    (p.pagefile_total as f64 * usage as f64 / 100.0) as u64,
+                    p.pagefile_total
+                )
+            ),
+            _ => "ページファイルなし".into(),
+        });
+    }
+
+    Tile {
+        id: "paging".into(),
+        title: "ページング".into(),
+        value: latest.and_then(|p| p.usage).map_or(NO_DATA.into(), format::percent),
+        color: MEMORY_COLOR,
+        graphs: vec![usage, rates],
+        legend: latest
+            .map(|p| {
+                vec![
+                    (Some(MEMORY_COLOR), format!("イン {}", format::bytes_per_sec(p.input))),
+                    (Some(PAGE_OUT_COLOR), format!("アウト {}", format::bytes_per_sec(p.output))),
+                ]
+            })
             .unwrap_or_default(),
         details,
         alert: false,

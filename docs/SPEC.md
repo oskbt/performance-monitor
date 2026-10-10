@@ -47,6 +47,14 @@ Windows のタスクマネージャー「パフォーマンス」タブ相当の
 | グラフ | 使用中メモリの時系列（0〜搭載容量） |
 | 数値 | 使用中 / 搭載量 (GB)、使用率 %、コミット済み / コミット上限 (GB) |
 
+### 3.2.1 ページング（メモリ列のメモリタイルの下）
+
+| 項目 | 内容 |
+|---|---|
+| グラフ | ページファイル使用率 %（0〜100%）の時系列 |
+| サブグラフ | ページイン（ディスクからの読み込み）・ページアウト（ディスクへの書き出し）の速度の時系列（2 系列重ね描き、縦軸は自動スケール） |
+| 数値 | ページファイル使用率 %、ページイン / ページアウト (KB/s, MB/s)、ページファイル使用量 / サイズ (GB)。ページファイルが無い場合は「ページファイルなし」 |
+
 ### 3.3 ディスク（物理ディスクごと）
 
 | 項目 | 内容 |
@@ -160,6 +168,7 @@ Windows のタスクマネージャー「パフォーマンス」タブ相当の
 | CPU 使用率 | PDH `\Processor Information(_Total)\% Processor Utility`（タスクマネージャーと同じ指標）。論理コア別は `\Processor Information(*)\% Processor Utility` |
 | CPU クロック | PDH `\Processor Information(_Total)\% Processor Performance` × 基本クロック（`\Processor Information(_Total)\Processor Frequency`） |
 | メモリ | `GlobalMemoryStatusEx`（使用量・搭載量）、`GetPerformanceInfo`（コミット） |
+| ページング | PDH `\Paging File(_Total)\% Usage`（使用率）、`\Memory\Pages Input/sec` / `Pages Output/sec`（× ページサイズでバイト/秒に換算）。ページファイルのサイズは `GetPerformanceInfo` の コミット上限 − 物理メモリ量 |
 | ディスク | PDH `\PhysicalDisk(*)\% Idle Time`（100 − 値 = アクティブ時間）、`Disk Read Bytes/sec`、`Disk Write Bytes/sec`。インスタンス名 `0 C: D:` からディスク番号・ドライブレターを取得 |
 | ネットワーク | `GetIfTable2` で各インターフェースの `InOctets` / `OutOctets` を取得し差分からスループット算出。`OperStatus`・`Type`・FilterInterface フラグでフィルタし、さらにレジストリ（ネットワークアダプタのデバイスクラス）の `Characteristics` に NCF_HIDDEN を持つアダプタを除外 |
 | GPU 使用率 | PDH `\GPU Engine(*)\Utilization Percentage`。インスタンス名 `pid_XXXX_luid_0x..._0x..._phys_0_eng_N_engtype_3D` を解析し、LUID × エンジン種別ごとに合算 |
