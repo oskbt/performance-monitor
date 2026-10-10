@@ -54,13 +54,24 @@ impl Collectors {
     }
 
     fn sample(&mut self) -> Snapshot {
-        Snapshot {
-            cpu: self.cpu.as_mut().and_then(|c| c.sample()),
-            memory: memory::sample(),
-            disks: self.disk.as_mut().map(|c| c.sample()).unwrap_or_default(),
-            networks: self.network.sample(),
-            gpus: self.gpu.as_mut().map(|c| c.sample()).unwrap_or_default(),
-        }
+        let t = Instant::now();
+        let cpu = self.cpu.as_mut().and_then(|c| c.sample());
+        let t_cpu = t.elapsed();
+        let memory = memory::sample();
+        let disks = self.disk.as_mut().map(|c| c.sample()).unwrap_or_default();
+        let t_disk = t.elapsed();
+        let networks = self.network.sample();
+        let t_net = t.elapsed();
+        let gpus = self.gpu.as_mut().map(|c| c.sample()).unwrap_or_default();
+        let t_gpu = t.elapsed();
+        log::debug!(
+            "sample: cpu {:?} disk {:?} net {:?} gpu {:?}",
+            t_cpu,
+            t_disk - t_cpu,
+            t_net - t_disk,
+            t_gpu - t_net
+        );
+        Snapshot { cpu, memory, disks, networks, gpus }
     }
 }
 
