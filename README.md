@@ -1,9 +1,14 @@
 # Performance Monitor
 
+[![Latest release](https://img.shields.io/github/v/release/oskbt/performance-monitor)](https://github.com/oskbt/performance-monitor/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+**[最新版をダウンロード](https://github.com/oskbt/performance-monitor/releases/latest)**（Windows 10 / 11、インストール不要）
+
 タスクマネージャーの「パフォーマンス」タブの情報を、**タブを切り替えずに 1 画面で**見られる Windows 用の常駐モニターです。
 CPU・メモリ・GPU・ディスク・ネットワークのグラフを種類ごとの列に並べ、画面の隅やサブモニターに常に表示しておけます。
 
-*A lightweight, always-on-top Windows performance monitor written in Rust. It shows everything from Task Manager's Performance tab — CPU (per thread), memory, paging, GPUs (with temperature and fan speed), disks and network adapters — on a single screen, without switching tabs.*
+*A lightweight, always-on-top Windows performance monitor written in Rust. It shows everything from Task Manager's Performance tab — CPU (per thread), memory, paging, GPUs (with temperature, fan speed and VRAM meters), disks and network adapters — on a single screen, without switching tabs.*
 
 ![スクリーンショット](docs/screenshot.png)
 
@@ -21,11 +26,14 @@ CPU・メモリ・GPU・ディスク・ネットワークのグラフを種類�
 |---|---|
 | CPU | 全体の使用率、スレッド（論理プロセッサ）ごとの使用率、クロック |
 | メモリ | 使用量 / 搭載量、コミット済み、ページング（ページファイル使用率、ページイン / アウト速度） |
-| GPU | エンジン別（3D / Copy / Video Encode / Decode）の使用率、専用 / 共有メモリ、**温度**、**ファン回転数** |
+| GPU | エンジン別（3D / Copy / Video Encode / Decode）の使用率、**温度**・**ファン回転数**・**専用 / 共有メモリ**のメーター |
 | ディスク | 物理ディスクごとのアクティブ時間、読み取り / 書き込み速度 |
 | ネットワーク | アダプタごとの受信 / 送信速度（Hyper-V や VMware、VPN などの仮想アダプタも表示） |
 
-GPU 温度は警告温度（既定 80℃）で黄、危険温度（既定 90℃）で赤になり、危険温度を超えるとタイルの枠も赤く強調されます。
+GPU のメーターは、状態に応じて色が変わります。
+
+- **温度**: 警告温度（既定 80℃）で黄、危険温度（既定 90℃）で赤。危険温度を超えるとタイルの枠も赤く強調されます。
+- **メモリ**: 使用率 80% で黄、95% で赤（VRAM が埋まるとカクつきの原因になるため）。
 
 ## 動作環境
 
