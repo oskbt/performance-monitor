@@ -29,6 +29,7 @@ impl History {
     }
 
     /// 古い順のサンプル。
+    #[cfg(test)]
     pub fn samples(&self) -> impl ExactSizeIterator<Item = &Arc<Snapshot>> {
         self.samples.iter()
     }

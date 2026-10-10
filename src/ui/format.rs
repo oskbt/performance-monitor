@@ -8,10 +8,6 @@ pub fn percent(v: f32) -> String {
     format!("{v:.0}%")
 }
 
-pub fn gb(bytes: u64) -> String {
-    format!("{:.1} GB", bytes as f64 / GIB)
-}
-
 /// 容量の組 `"12.3 / 31.8 GB"`。
 pub fn gb_pair(used: u64, total: u64) -> String {
     format!("{:.1} / {:.1} GB", used as f64 / GIB, total as f64 / GIB)
@@ -93,7 +89,6 @@ mod tests {
 
     #[test]
     fn gb_values() {
-        assert_eq!(gb((12.3 * GIB) as u64), "12.3 GB");
         assert_eq!(gb_pair((1.5 * GIB) as u64, (32.0 * GIB) as u64), "1.5 / 32.0 GB");
     }
 

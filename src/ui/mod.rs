@@ -4,6 +4,7 @@ pub mod format;
 pub mod graph;
 pub mod tile;
 
+use crate::collector::EngineKind;
 use crate::history::History;
 use eframe::egui::Color32;
 use graph::Series;
@@ -16,6 +17,19 @@ const DISK_WRITE_COLOR: Color32 = Color32::from_rgb(0xd4, 0xe1, 0x57);
 
 pub const NETWORK_COLOR: Color32 = Color32::from_rgb(0xe0, 0x8e, 0x3c);
 const NETWORK_SEND_COLOR: Color32 = Color32::from_rgb(0xf5, 0xd0, 0x8a);
+
+pub const GPU_COLOR: Color32 = Color32::from_rgb(0x40, 0xc8, 0xd8);
+
+/// GPU のエンジン種別ごとの線の色。
+fn engine_color(kind: EngineKind) -> Color32 {
+    match kind {
+        EngineKind::ThreeD => GPU_COLOR,
+        EngineKind::Copy => Color32::from_rgb(0xe8, 0xc5, 0x4a),
+        EngineKind::VideoEncode => Color32::from_rgb(0xe8, 0x6a, 0x9a),
+        EngineKind::VideoDecode => Color32::from_rgb(0xa0, 0x8c, 0xf0),
+        EngineKind::VideoCodec => Color32::from_rgb(0x7c, 0xd6, 0x9c),
+    }
+}
 
 /// ディスク速度グラフの縦軸の最小上限（1 MB/s）。
 const DISK_MIN_SCALE: f64 = 1024.0 * 1024.0;
@@ -30,6 +44,7 @@ pub fn build_tiles(history: &History, per_core_cpu: bool) -> Vec<Tile> {
     if let Some(latest) = history.latest() {
         tiles.extend(latest.disks.iter().map(|d| disk_tile(history, d.index)));
         tiles.extend(latest.networks.iter().map(|n| network_tile(history, &n.id)));
+        tiles.extend(latest.gpus.iter().map(|g| gpu_tile(history, g.luid)));
     }
     tiles
 }
@@ -196,6 +211,58 @@ fn network_tile(history: &History, id: &str) -> Tile {
                     (Some(NETWORK_COLOR), format!("受信 {}", format::bits_per_sec(n.received))),
                     (Some(NETWORK_SEND_COLOR), format!("送信 {}", format::bits_per_sec(n.sent))),
                 ]
+            })
+            .unwrap_or_default(),
+        details,
+    }
+}
+
+fn gpu_tile(history: &History, luid: (u32, u32)) -> Tile {
+    let find = |s: &crate::collector::Snapshot| s.gpus.iter().find(|g| g.luid == luid).cloned();
+    let latest = history.latest().and_then(|s| find(s));
+    let kinds: Vec<EngineKind> =
+        latest.as_ref().map(|g| g.engines.iter().map(|(k, _)| *k).collect()).unwrap_or_default();
+
+    let series = kinds
+        .iter()
+        .enumerate()
+        .map(|(i, &kind)| {
+            let values = history.series(|s| {
+                find(s)?.engines.iter().find(|(k, _)| *k == kind).map(|(_, v)| *v)
+            });
+            if i == 0 {
+                Series::filled(values, engine_color(kind))
+            } else {
+                Series::line(values, engine_color(kind))
+            }
+        })
+        .collect();
+
+    let mut details = Vec::new();
+    if let Some(g) = &latest {
+        if g.dedicated_total > 0 {
+            details.push(format!(
+                "専用メモリ {}",
+                format::gb_pair(g.dedicated_used, g.dedicated_total)
+            ));
+        }
+        details.push(format!("共有メモリ {}", format::gb_pair(g.shared_used, g.shared_total)));
+    }
+
+    Tile {
+        id: format!("gpu:{:08x}_{:08x}", luid.0, luid.1),
+        title: latest
+            .as_ref()
+            .map_or_else(|| "GPU".into(), |g| format!("GPU {} ({})", g.index, g.name)),
+        value: latest.as_ref().map_or(NO_DATA.into(), |g| format::percent(g.usage)),
+        color: GPU_COLOR,
+        graphs: vec![Graph::Lines { series, max: 100.0, scale: None }],
+        legend: latest
+            .map(|g| {
+                g.engines
+                    .iter()
+                    .map(|&(k, v)| (Some(engine_color(k)), format!("{} {}", k.label(), format::percent(v))))
+                    .collect()
             })
             .unwrap_or_default(),
         details,
