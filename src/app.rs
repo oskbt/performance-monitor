@@ -14,6 +14,8 @@ use windows::Win32::Foundation::HWND;
 const BG: Color32 = Color32::from_rgb(0x16, 0x18, 0x1c);
 const MIN_TILE_W: f32 = 220.0;
 const TILE_GAP: f32 = 6.0;
+/// 枠なし時にリサイズ操作を受け付けるウィンドウ端の幅。
+const RESIZE_MARGIN: f32 = 6.0;
 
 pub struct MonitorApp {
     config: Config,
@@ -130,6 +132,7 @@ impl eframe::App for MonitorApp {
         let visible: Vec<_> =
             tiles.into_iter().filter(|t| !self.config.hidden.contains(&t.id)).collect();
 
+        let resizing = self.config.borderless && handle_borderless_resize(ctx);
         let compact = self.config.compact;
         let bg = BG.gamma_multiply(self.config.opacity);
         egui::CentralPanel::default()
@@ -143,7 +146,7 @@ impl eframe::App for MonitorApp {
                     ui.id().with("background"),
                     egui::Sense::click_and_drag(),
                 );
-                if bg_response.drag_started() && self.config.borderless {
+                if bg_response.drag_started() && self.config.borderless && !resizing {
                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
                 bg_response.context_menu(|ui| self.context_menu(ui, None));
@@ -181,7 +184,7 @@ impl eframe::App for MonitorApp {
                                     vec2(tile_w, row_h),
                                 );
                                 let response = tile.draw(ui, rect, compact, capacity);
-                                if response.drag_started() && self.config.borderless {
+                                if response.drag_started() && self.config.borderless && !resizing {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                                 }
                                 response.context_menu(|ui| self.context_menu(ui, Some(&tile.id)));
@@ -194,6 +197,37 @@ impl eframe::App for MonitorApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.config.save();
     }
+}
+
+/// 枠なしウィンドウの端でのリサイズ。端でマウスを押したら true を返す。
+fn handle_borderless_resize(ctx: &egui::Context) -> bool {
+    use egui::{CursorIcon, ResizeDirection as D};
+
+    let (pos, rect, pressed) =
+        ctx.input(|i| (i.pointer.hover_pos(), i.viewport_rect(), i.pointer.primary_pressed()));
+    let Some(pos) = pos else { return false };
+
+    let left = pos.x - rect.left() < RESIZE_MARGIN;
+    let right = rect.right() - pos.x < RESIZE_MARGIN;
+    let top = pos.y - rect.top() < RESIZE_MARGIN;
+    let bottom = rect.bottom() - pos.y < RESIZE_MARGIN;
+    let (direction, cursor) = match (left, right, top, bottom) {
+        (true, _, true, _) => (D::NorthWest, CursorIcon::ResizeNorthWest),
+        (_, true, true, _) => (D::NorthEast, CursorIcon::ResizeNorthEast),
+        (true, _, _, true) => (D::SouthWest, CursorIcon::ResizeSouthWest),
+        (_, true, _, true) => (D::SouthEast, CursorIcon::ResizeSouthEast),
+        (true, ..) => (D::West, CursorIcon::ResizeWest),
+        (_, true, ..) => (D::East, CursorIcon::ResizeEast),
+        (_, _, true, _) => (D::North, CursorIcon::ResizeNorth),
+        (.., true) => (D::South, CursorIcon::ResizeSouth),
+        _ => return false,
+    };
+
+    ctx.set_cursor_icon(cursor);
+    if pressed {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+    }
+    pressed
 }
 
 /// 日本語を表示できるよう Windows のシステムフォントをフォールバックとして追加する。
