@@ -123,7 +123,7 @@ pub fn meter_color(value: f32, warning: f32, danger: f32) -> Color32 {
 
 /// 横棒のメーター。`thresholds`（警告, 危険）があればその位置に目盛りを描いて値に応じて色を変え、
 /// 無ければ `color` で描く。
-/// `value` が None なら「取得不可」と表示する。
+/// バーの右には `text` を表示する。`value` が None なら「取得不可」と表示する。
 pub fn draw_meter(
     painter: &Painter,
     rect: Rect,
@@ -132,15 +132,15 @@ pub fn draw_meter(
     max: f32,
     thresholds: Option<(f32, f32)>,
     color: Color32,
-    unit: &str,
+    text: &str,
 ) {
     let font = FontId::proportional(11.0);
-    let text = Color32::from_rgb(0xf0, 0xf2, 0xf4);
+    let label_color = Color32::from_rgb(0xf0, 0xf2, 0xf4);
 
     // 数値はバーの右外側に置き、しきい値の目盛りと重ならないようにする
     let color_of = |v: f32| thresholds.map_or(color, |(w, d)| meter_color(v, w, d));
     let (value_text, value_color) = match value {
-        Some(v) => (format!("{v:.0}{unit}"), color_of(v)),
+        Some(v) => (text.to_string(), color_of(v)),
         None => ("取得不可".to_string(), LABEL),
     };
     let value_galley = painter.layout_no_wrap(value_text, font.clone(), value_color);
@@ -165,7 +165,7 @@ pub fn draw_meter(
             painter.vline(x_at(threshold), bar.y_range(), Stroke::new(1.0, color));
         }
     }
-    painter.text(bar.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, label, font, text);
+    painter.text(bar.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, label, font, label_color);
 }
 
 fn draw_grid(painter: &Painter, rect: Rect) {

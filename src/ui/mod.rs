@@ -290,6 +290,9 @@ fn network_tile(history: &History, id: &str) -> Tile {
 const GPU_TEMP_MAX: f32 = 100.0;
 /// ドライバが最大回転数を報告しない場合のファンメーターの上限 (RPM)。
 const GPU_FAN_MAX_DEFAULT: f32 = 3000.0;
+/// GPU メモリメーターの警告・危険しきい値（総量に対する割合）。
+const GPU_MEMORY_WARNING: f32 = 0.80;
+const GPU_MEMORY_DANGER: f32 = 0.95;
 
 fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) -> Tile {
     let find = |s: &crate::collector::Snapshot| s.gpus.iter().find(|g| g.luid == luid).cloned();
@@ -312,15 +315,35 @@ fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) ->
         })
         .collect();
 
-    let mut details = Vec::new();
+    let temperature = latest.as_ref().and_then(|g| g.temperature);
+    let fan_rpm = latest.as_ref().and_then(|g| g.fan_rpm);
+    let mut graphs = vec![
+        Graph::Lines { series, max: 100.0, scale: None },
+        Graph::Meter {
+            label: "温度".into(),
+            value: temperature,
+            max: GPU_TEMP_MAX,
+            thresholds: Some(temp_thresholds),
+            text: temperature.map(|t| format!("{t:.0}℃")).unwrap_or_default(),
+        },
+        Graph::Meter {
+            label: "ファン".into(),
+            value: fan_rpm.map(|rpm| rpm as f32),
+            max: latest
+                .as_ref()
+                .and_then(|g| g.fan_max_rpm)
+                .map_or(GPU_FAN_MAX_DEFAULT, |max| max as f32),
+            thresholds: None,
+            text: fan_rpm.map(|rpm| format!("{rpm} RPM")).unwrap_or_default(),
+        },
+    ];
     if let Some(g) = &latest {
         if g.dedicated_total > 0 {
-            details.push(format!(
-                "専用メモリ {}",
-                format::gb_pair(g.dedicated_used, g.dedicated_total)
-            ));
+            graphs.push(memory_meter("専用メモリ", g.dedicated_used, g.dedicated_total));
         }
-        details.push(format!("共有メモリ {}", format::gb_pair(g.shared_used, g.shared_total)));
+        if g.shared_total > 0 {
+            graphs.push(memory_meter("共有メモリ", g.shared_used, g.shared_total));
+        }
     }
 
     Tile {
@@ -330,31 +353,9 @@ fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) ->
             .map_or_else(|| "GPU".into(), |g| format!("GPU {} ({})", g.index, g.name)),
         value: latest.as_ref().map_or(NO_DATA.into(), |g| format::percent(g.usage)),
         color: GPU_COLOR,
-        graphs: vec![
-            Graph::Lines { series, max: 100.0, scale: None },
-            Graph::Meter {
-                label: "温度".into(),
-                value: latest.as_ref().and_then(|g| g.temperature),
-                max: GPU_TEMP_MAX,
-                thresholds: Some(temp_thresholds),
-                unit: "℃",
-            },
-            Graph::Meter {
-                label: "ファン".into(),
-                value: latest.as_ref().and_then(|g| g.fan_rpm).map(|rpm| rpm as f32),
-                max: latest
-                    .as_ref()
-                    .and_then(|g| g.fan_max_rpm)
-                    .map_or(GPU_FAN_MAX_DEFAULT, |max| max as f32),
-                thresholds: None,
-                unit: " RPM",
-            },
-        ],
+        graphs,
         slim: false,
-        alert: latest
-            .as_ref()
-            .and_then(|g| g.temperature)
-            .is_some_and(|t| t >= temp_thresholds.1),
+        alert: temperature.is_some_and(|t| t >= temp_thresholds.1),
         legend: latest
             .map(|g| {
                 g.engines
@@ -363,6 +364,19 @@ fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) ->
                     .collect()
             })
             .unwrap_or_default(),
-        details,
+        details: Vec::new(),
+    }
+}
+
+/// GPU メモリのメーター。使用率 80% で黄、95% で赤（VRAM が埋まると性能が落ちるため）。
+fn memory_meter(label: &str, used: u64, total: u64) -> Graph {
+    const GIB: f32 = 1024.0 * 1024.0 * 1024.0;
+    let total_gib = total as f32 / GIB;
+    Graph::Meter {
+        label: label.into(),
+        value: Some(used as f32 / GIB),
+        max: total_gib,
+        thresholds: Some((total_gib * GPU_MEMORY_WARNING, total_gib * GPU_MEMORY_DANGER)),
+        text: format::gb_pair(used, total),
     }
 }
