@@ -1,6 +1,7 @@
 //! 各種パフォーマンス値の収集。UI とは別スレッドで動く。
 
 mod cpu;
+mod disk;
 mod memory;
 mod pdh;
 
@@ -11,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub use cpu::CpuSample;
+pub use disk::DiskSample;
 pub use memory::MemorySample;
 
 /// ある時点の全項目の値。
@@ -18,10 +20,12 @@ pub use memory::MemorySample;
 pub struct Snapshot {
     pub cpu: Option<CpuSample>,
     pub memory: Option<MemorySample>,
+    pub disks: Vec<DiskSample>,
 }
 
 struct Collectors {
     cpu: Option<cpu::CpuCollector>,
+    disk: Option<disk::DiskCollector>,
 }
 
 impl Collectors {
@@ -30,6 +34,9 @@ impl Collectors {
             cpu: cpu::CpuCollector::new()
                 .inspect_err(|e| log::error!("CPU 情報を取得できません: {e}"))
                 .ok(),
+            disk: disk::DiskCollector::new()
+                .inspect_err(|e| log::error!("ディスク情報を取得できません: {e}"))
+                .ok(),
         }
     }
 
@@ -37,6 +44,7 @@ impl Collectors {
         Snapshot {
             cpu: self.cpu.as_mut().and_then(|c| c.sample()),
             memory: memory::sample(),
+            disks: self.disk.as_mut().map(|c| c.sample()).unwrap_or_default(),
         }
     }
 }

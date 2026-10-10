@@ -59,6 +59,18 @@ pub fn nice_ceiling(v: f64) -> f64 {
     10.0 * base
 }
 
+/// バイト毎秒の縦軸上限。表示単位（KB/MB/GB）ごとにきりのいい数にする。
+pub fn nice_bytes_ceiling(v: f64) -> f64 {
+    let unit = if v < MIB {
+        KIB
+    } else if v < GIB {
+        MIB
+    } else {
+        GIB
+    };
+    nice_ceiling(v / unit) * unit
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,5 +108,13 @@ mod tests {
         assert_eq!(nice_ceiling(100.0), 100.0);
         assert_eq!(nice_ceiling(120_000.0), 200_000.0);
         assert_eq!(nice_ceiling(0.03), 0.05);
+    }
+
+    #[test]
+    fn nice_bytes() {
+        assert_eq!(bytes_per_sec(nice_bytes_ceiling(MIB)), "1.0 MB/s");
+        assert_eq!(bytes_per_sec(nice_bytes_ceiling(1.5 * MIB)), "2.0 MB/s");
+        assert_eq!(bytes_per_sec(nice_bytes_ceiling(300.0 * KIB)), "500 KB/s");
+        assert_eq!(bytes_per_sec(nice_bytes_ceiling(3.0 * GIB)), "5.00 GB/s");
     }
 }
