@@ -32,7 +32,8 @@ pub struct Tile {
     /// 右上に大きく表示する現在値。
     pub value: String,
     pub color: Color32,
-    pub graph: Graph,
+    /// 上から順に描くグラフ。2 つ目以降は小さめに描き、コンパクト表示では省略する。
+    pub graphs: Vec<Graph>,
     /// グラフ下の 1 行（凡例・主要な数値）。コンパクト表示でも表示する。
     pub legend: Vec<(Option<Color32>, String)>,
     /// 補助情報。コンパクト表示では省略する。
@@ -41,11 +42,8 @@ pub struct Tile {
 
 impl Tile {
     pub fn height(&self, compact: bool) -> f32 {
-        let mut graph_h = if compact { GRAPH_H_COMPACT } else { GRAPH_H };
-        if matches!(self.graph, Graph::Cells(_)) {
-            graph_h *= 1.6;
-        }
-        let mut h = PAD + HEADER_H + graph_h + PAD;
+        let graphs_h: f32 = self.graph_heights(compact).iter().map(|h| h + GAP).sum();
+        let mut h = PAD + HEADER_H + graphs_h - GAP + PAD;
         if !self.legend.is_empty() {
             h += GAP + LINE_H;
         }
@@ -53,6 +51,20 @@ impl Tile {
             h += self.details.len() as f32 * LINE_H;
         }
         h
+    }
+
+    fn graph_heights(&self, compact: bool) -> Vec<f32> {
+        let base = if compact { GRAPH_H_COMPACT } else { GRAPH_H };
+        self.graphs
+            .iter()
+            .take(if compact { 1 } else { usize::MAX })
+            .enumerate()
+            .map(|(i, g)| match (i, g) {
+                (_, Graph::Cells(_)) => base * 1.6,
+                (0, _) => base,
+                _ => base * 0.6,
+            })
+            .collect()
     }
 
     pub fn draw(&self, ui: &mut egui::Ui, rect: Rect, compact: bool, capacity: usize) -> Response {
@@ -85,31 +97,19 @@ impl Tile {
             TEXT,
         );
 
-        // グラフ
-        let footer_h = if self.legend.is_empty() { 0.0 } else { GAP + LINE_H }
-            + if compact { 0.0 } else { self.details.len() as f32 * LINE_H };
-        let graph_rect = Rect::from_min_max(
-            inner.left_top() + vec2(0.0, HEADER_H),
-            egui::pos2(inner.right(), inner.bottom() - footer_h),
-        );
-        match &self.graph {
-            Graph::Lines { series, max, scale } => {
-                graph::draw(&painter, graph_rect, series, *max, capacity, self.color.gamma_multiply(0.6));
-                if let Some(scale) = scale {
-                    painter.text(
-                        graph_rect.left_top() + vec2(3.0, 1.0),
-                        Align2::LEFT_TOP,
-                        scale,
-                        FontId::proportional(10.0),
-                        TEXT_DIM,
-                    );
-                }
-            }
-            Graph::Cells(cells) => graph::draw_cells(&painter, graph_rect, cells, capacity, self.color),
+        // グラフ（行の高さが揃えられて余った分は 1 つ目のグラフに回す）
+        let mut heights = self.graph_heights(compact);
+        if let Some(first) = heights.first_mut() {
+            *first += (rect.height() - self.height(compact)).max(0.0);
+        }
+        let mut y = inner.top() + HEADER_H;
+        for (graph, h) in self.graphs.iter().zip(heights) {
+            let graph_rect = Rect::from_min_size(egui::pos2(inner.left(), y), vec2(inner.width(), h));
+            self.draw_graph(&painter, graph_rect, graph, capacity);
+            y += h + GAP;
         }
 
         // 凡例
-        let mut y = graph_rect.bottom() + GAP;
         if !self.legend.is_empty() {
             let mut x = inner.left();
             for (color, text) in &self.legend {
@@ -141,6 +141,24 @@ impl Tile {
         }
 
         response
+    }
+
+    fn draw_graph(&self, painter: &egui::Painter, rect: Rect, graph: &Graph, capacity: usize) {
+        match graph {
+            Graph::Lines { series, max, scale } => {
+                graph::draw(painter, rect, series, *max, capacity, self.color.gamma_multiply(0.6));
+                if let Some(scale) = scale {
+                    painter.text(
+                        rect.left_top() + vec2(3.0, 1.0),
+                        Align2::LEFT_TOP,
+                        scale,
+                        FontId::proportional(10.0),
+                        TEXT_DIM,
+                    );
+                }
+            }
+            Graph::Cells(cells) => graph::draw_cells(painter, rect, cells, capacity, self.color),
+        }
     }
 }
 
