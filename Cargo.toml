@@ -1,0 +1,32 @@
+[package]
+name = "performance-monitor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow"] }
+env_logger = "0.11.11"
+log = "0.4.34"
+raw-window-handle = "0.6"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_Performance",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
