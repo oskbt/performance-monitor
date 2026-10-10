@@ -77,7 +77,7 @@ history_seconds = 60      # グラフに表示する期間（秒）
 
 - **CPU 温度は表示しません。** Windows 標準の手段では取得できない環境が多く、正確な値を読むにはカーネルドライバと管理者権限が必要になるためです。
 - GPU の温度・ファン回転数は、ドライバが報告しない場合「取得不可」と表示されます。ファンが 0 RPM のときは、低温時にファンを止める機能で停止している状態です。
-- メモリ使用量は約 110MB です。大半は GPU ドライバ（OpenGL）と日本語フォントの分です。
+- メモリ使用量は約 95MB です。大半は GPU ドライバ（OpenGL）の分です。
 
 ## 技術的な詳細
 
@@ -86,7 +86,10 @@ history_seconds = 60      # グラフに表示する期間（秒）
 - GUI: [eframe / egui](https://github.com/emilk/egui)
 - Windows API: [windows-rs](https://github.com/microsoft/windows-rs)（PDH、DXGI、D3DKMT、IP Helper）
 - タスクトレイ: [tray-icon](https://github.com/tauri-apps/tray-icon)
+- 日本語フォント: [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) の、画面表示に使う文字だけを切り出したサブセット（約 80KB）を exe に埋め込んでいます。ネットワークアダプタ名などにサブセットに無い文字が現れた場合だけ、システムの日本語フォントを追加で読み込みます。画面に出す日本語を変更したら `python tools/make_font_subset.py <BIZUDPGothic-Regular.ttf>` でサブセットを作り直してください（`cargo test` が収録漏れを検出します）。
 
 ## ライセンス
 
 [MIT License](LICENSE)
+
+同梱しているフォント（`assets/fonts/BIZUDPGothic-subset.ttf`）は BIZ UDPGothic のサブセットで、[SIL Open Font License 1.1](assets/fonts/OFL.txt) に従います。

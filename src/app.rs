@@ -2,6 +2,7 @@
 
 use crate::autostart;
 use crate::collector;
+use crate::fonts::JapaneseFonts;
 use crate::tray;
 use crate::config::{Config, UPDATE_INTERVALS_MS};
 use crate::history::History;
@@ -27,6 +28,7 @@ pub struct MonitorApp {
     all_tiles: Vec<(String, String)>,
     /// Windows 起動時の自動起動。レジストリが正なので設定ファイルには保存しない。
     autostart: bool,
+    fonts: JapaneseFonts,
     /// タスクトレイのアイコン。破棄するとトレイから消えるため保持する。
     _tray: Option<tray_icon::TrayIcon>,
 }
@@ -34,7 +36,7 @@ pub struct MonitorApp {
 impl MonitorApp {
     pub fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Self {
         cc.egui_ctx.set_theme(egui::Theme::Dark);
-        setup_fonts(&cc.egui_ctx);
+        let fonts = JapaneseFonts::install(&cc.egui_ctx);
 
         let hwnd = winutil::hwnd_of(cc);
         if let (Some(hwnd), Some(rect)) = (hwnd, config.window) {
@@ -58,6 +60,7 @@ impl MonitorApp {
             interval_ms,
             all_tiles: Vec::new(),
             autostart: autostart::is_enabled(),
+            fonts,
             _tray: tray,
         }
     }
@@ -157,6 +160,16 @@ impl eframe::App for MonitorApp {
             history.set_capacity(self.config.history_len());
             (ui::build_columns(&history, &self.config), history.capacity())
         };
+        // アダプタ名など OS から来る文字列に、内蔵フォントで描けない文字が無いか確認する
+        self.fonts.ensure_glyphs(
+            ctx,
+            columns.iter().flatten().flat_map(|t| {
+                [t.title.as_str(), t.value.as_str()]
+                    .into_iter()
+                    .chain(t.legend.iter().map(|(_, s)| s.as_str()))
+                    .chain(t.details.iter().map(String::as_str))
+            }),
+        );
         self.all_tiles =
             columns.iter().flatten().map(|t| (t.id.clone(), t.title.clone())).collect();
         let visible: Vec<Vec<_>> = columns
@@ -275,27 +288,4 @@ fn handle_edge_resize(ctx: &egui::Context) -> bool {
         ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
     }
     pressed
-}
-
-/// 日本語を表示できるよう Windows のシステムフォントをフォールバックとして追加する。
-fn setup_fonts(ctx: &egui::Context) {
-    const CANDIDATES: [&str; 3] = ["meiryo.ttc", "YuGothM.ttc", "msgothic.ttc"];
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-
-    let Some(data) = CANDIDATES
-        .iter()
-        .find_map(|name| std::fs::read(format!(r"{windir}\Fonts\{name}")).ok())
-    else {
-        log::warn!("日本語フォントが見つかりませんでした");
-        return;
-    };
-
-    let mut fonts = egui::FontDefinitions::default();
-    fonts
-        .font_data
-        .insert("jp".into(), egui::FontData::from_owned(data).into());
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("jp".into());
-    }
-    ctx.set_fonts(fonts);
 }
