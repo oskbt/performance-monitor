@@ -8,8 +8,6 @@ pub const GRAPH_BG: Color32 = Color32::from_rgb(0x0e, 0x10, 0x13);
 const GRID: Color32 = Color32::from_rgb(0x26, 0x2a, 0x30);
 const LABEL: Color32 = Color32::from_rgb(0x9a, 0xa0, 0xa8);
 
-/// 小グラフ 1 つの最小幅。
-const CELL_MIN_W: f32 = 84.0;
 pub const CELL_GAP: f32 = 3.0;
 
 pub struct Series {
@@ -76,32 +74,16 @@ fn draw_with_grid(
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, border), StrokeKind::Inside);
 }
 
-/// `n` 個の小グラフを幅 `width` に並べるときの (列数, 行数)。
-pub fn cell_grid(n: usize, width: f32) -> (usize, usize) {
-    let cols = (((width + CELL_GAP) / (CELL_MIN_W + CELL_GAP)).floor() as usize).clamp(1, n.max(1));
-    (cols, n.div_ceil(cols))
-}
-
-/// 小さなグラフを `cols` 列の格子状に並べる（スレッド別 CPU など）。
+/// 小さなグラフを縦 1 列に並べる（スレッド別 CPU など）。
 /// 各セルの左上に番号、右上に現在値を表示する。
-pub fn draw_cells(
-    painter: &Painter,
-    rect: Rect,
-    cells: &[Vec<f32>],
-    cols: usize,
-    capacity: usize,
-    color: Color32,
-) {
-    let cols = cols.max(1);
-    let rows = cells.len().div_ceil(cols).max(1);
-    let w = (rect.width() - CELL_GAP * (cols - 1) as f32) / cols as f32;
-    let h = (rect.height() - CELL_GAP * (rows - 1) as f32) / rows as f32;
+pub fn draw_cells(painter: &Painter, rect: Rect, cells: &[Vec<f32>], capacity: usize, color: Color32) {
+    let n = cells.len().max(1);
+    let h = (rect.height() - CELL_GAP * (n - 1) as f32) / n as f32;
     let font = FontId::proportional(10.0);
 
     for (i, values) in cells.iter().enumerate() {
-        let (r, c) = (i / cols, i % cols);
-        let min = rect.min + vec2(c as f32 * (w + CELL_GAP), r as f32 * (h + CELL_GAP));
-        let cell = Rect::from_min_size(min, vec2(w, h));
+        let min = rect.min + vec2(0.0, i as f32 * (h + CELL_GAP));
+        let cell = Rect::from_min_size(min, vec2(rect.width(), h));
         draw_with_grid(
             painter,
             cell,
@@ -122,6 +104,63 @@ pub fn draw_cells(
             );
         }
     }
+}
+
+pub const METER_OK: Color32 = Color32::from_rgb(0x5c, 0xb8, 0x5c);
+pub const METER_WARNING: Color32 = Color32::from_rgb(0xf0, 0xad, 0x4e);
+pub const METER_DANGER: Color32 = Color32::from_rgb(0xe5, 0x53, 0x4b);
+
+/// しきい値に応じたメーターの色。
+pub fn meter_color(value: f32, warning: f32, danger: f32) -> Color32 {
+    if value >= danger {
+        METER_DANGER
+    } else if value >= warning {
+        METER_WARNING
+    } else {
+        METER_OK
+    }
+}
+
+/// 横棒のメーター。`warning` / `danger` の位置に目盛りを描き、値に応じて色を変える。
+/// `value` が None なら「取得不可」と表示する。
+pub fn draw_meter(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    value: Option<f32>,
+    max: f32,
+    (warning, danger): (f32, f32),
+    unit: &str,
+) {
+    let font = FontId::proportional(11.0);
+    let text = Color32::from_rgb(0xf0, 0xf2, 0xf4);
+
+    // 数値はバーの右外側に置き、しきい値の目盛りと重ならないようにする
+    let (value_text, value_color) = match value {
+        Some(v) => (format!("{v:.0}{unit}"), meter_color(v, warning, danger)),
+        None => ("取得不可".to_string(), LABEL),
+    };
+    let value_galley = painter.layout_no_wrap(value_text, font.clone(), value_color);
+    let bar = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right() - value_galley.size().x - 6.0, rect.bottom()),
+    );
+    painter.galley(
+        pos2(rect.right() - value_galley.size().x, rect.center().y - value_galley.size().y / 2.0),
+        value_galley,
+        value_color,
+    );
+
+    painter.rect_filled(bar, 2.0, GRAPH_BG);
+    let x_at = |v: f32| bar.left() + bar.width() * (v / max).clamp(0.0, 1.0);
+    if let Some(v) = value {
+        let fill = Rect::from_min_max(bar.min, pos2(x_at(v), bar.bottom()));
+        painter.rect_filled(fill, 2.0, meter_color(v, warning, danger).gamma_multiply(0.75));
+    }
+    for (threshold, color) in [(warning, METER_WARNING), (danger, METER_DANGER)] {
+        painter.vline(x_at(threshold), bar.y_range(), Stroke::new(1.0, color));
+    }
+    painter.text(bar.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, label, font, text);
 }
 
 fn draw_grid(painter: &Painter, rect: Rect) {
@@ -170,13 +209,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cell_grid_layout() {
-        // 16 スレッドを幅 184 に並べると 2 列 × 8 行
-        assert_eq!(cell_grid(16, 184.0), (2, 8));
-        // 狭くても最低 1 列
-        assert_eq!(cell_grid(4, 10.0), (1, 4));
-        // 列数はセル数を超えない
-        assert_eq!(cell_grid(2, 1000.0), (2, 1));
-        assert_eq!(cell_grid(0, 100.0), (1, 0));
+    fn meter_thresholds() {
+        assert_eq!(meter_color(50.0, 80.0, 90.0), METER_OK);
+        assert_eq!(meter_color(80.0, 80.0, 90.0), METER_WARNING);
+        assert_eq!(meter_color(95.0, 80.0, 90.0), METER_DANGER);
     }
 }

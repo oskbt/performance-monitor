@@ -16,8 +16,9 @@ const HEADER_H: f32 = 22.0;
 const GRAPH_H: f32 = 70.0;
 const GRAPH_H_COMPACT: f32 = 34.0;
 /// スレッド別などの小グラフ 1 つ分の高さ。
-const CELL_H: f32 = 40.0;
-const CELL_H_COMPACT: f32 = 26.0;
+const CELL_H: f32 = 28.0;
+const CELL_H_COMPACT: f32 = 20.0;
+const METER_H: f32 = 16.0;
 const LINE_H: f32 = 16.0;
 const GAP: f32 = 4.0;
 const MARKER_W: f32 = 12.0;
@@ -30,8 +31,17 @@ fn legend_font() -> FontId {
 pub enum Graph {
     /// 1 つのグラフに複数系列を重ねる。`scale` は縦軸上限のラベル。
     Lines { series: Vec<Series>, max: f32, scale: Option<String> },
-    /// 系列ごとに小さなグラフを格子状に並べる（0〜100%）。各セルに番号と現在値を表示する。
+    /// 系列ごとに小さなグラフを縦に並べる（0〜100%）。各セルに番号と現在値を表示する。
     Cells(Vec<Vec<f32>>),
+    /// 横棒のメーター（温度など）。コンパクト表示でも表示する。
+    Meter {
+        label: String,
+        value: Option<f32>,
+        max: f32,
+        /// (警告, 危険) のしきい値。
+        thresholds: (f32, f32),
+        unit: &'static str,
+    },
 }
 
 pub struct Tile {
@@ -47,13 +57,15 @@ pub struct Tile {
     pub legend: Vec<(Option<Color32>, String)>,
     /// 補助情報。コンパクト表示では省略する。
     pub details: Vec<String>,
+    /// 危険な状態（温度超過など）。枠を赤く強調する。
+    pub alert: bool,
 }
 
 impl Tile {
     /// 幅 `width` で描いたときに必要な高さ。
     pub fn height(&self, painter: &egui::Painter, compact: bool, width: f32) -> f32 {
         let graphs_h: f32 =
-            self.graph_layout(compact, width - 2.0 * PAD).iter().map(|(_, h)| h + GAP).sum();
+            self.graph_layout(compact).iter().map(|(_, h)| h + GAP).sum();
         let mut h = PAD + HEADER_H + graphs_h - GAP + PAD;
         if let Some(rows) = self.legend_layout(painter, width - 2.0 * PAD).last().map(|e| e.0 + 1) {
             h += GAP + rows as f32 * LINE_H;
@@ -84,8 +96,8 @@ impl Tile {
             .collect()
     }
 
-    /// 描くグラフとその高さ。`width` はタイル内側の幅。
-    fn graph_layout(&self, compact: bool, width: f32) -> Vec<(&Graph, f32)> {
+    /// 描くグラフとその高さ。
+    fn graph_layout(&self, compact: bool) -> Vec<(&Graph, f32)> {
         let base = if compact { GRAPH_H_COMPACT } else { GRAPH_H };
         let cell_h = if compact { CELL_H_COMPACT } else { CELL_H };
         self.graphs
@@ -94,9 +106,9 @@ impl Tile {
             .filter_map(|(i, g)| {
                 let h = match g {
                     Graph::Cells(cells) => {
-                        let (_, rows) = graph::cell_grid(cells.len(), width);
-                        rows as f32 * (cell_h + graph::CELL_GAP) - graph::CELL_GAP
+                        cells.len() as f32 * (cell_h + graph::CELL_GAP) - graph::CELL_GAP
                     }
+                    Graph::Meter { .. } => METER_H,
                     Graph::Lines { .. } if i == 0 => base,
                     Graph::Lines { .. } if compact => return None,
                     Graph::Lines { .. } => base * 0.6,
@@ -110,13 +122,12 @@ impl Tile {
         let response = ui.interact(rect, ui.id().with(&self.id), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
 
-        painter.rect(
-            rect,
-            CornerRadius::same(4),
-            TILE_BG,
-            Stroke::new(1.0, self.color.gamma_multiply(0.35)),
-            StrokeKind::Inside,
-        );
+        let border = if self.alert {
+            Stroke::new(2.0, graph::METER_DANGER)
+        } else {
+            Stroke::new(1.0, self.color.gamma_multiply(0.35))
+        };
+        painter.rect(rect, CornerRadius::same(4), TILE_BG, border, StrokeKind::Inside);
 
         let inner = rect.shrink(PAD);
 
@@ -137,7 +148,7 @@ impl Tile {
         );
 
         // グラフ（割り当てられた高さが必要より大きい場合、余りは 1 つ目のグラフに回す）
-        let mut layout = self.graph_layout(compact, inner.width());
+        let mut layout = self.graph_layout(compact);
         if let Some((_, first)) = layout.first_mut() {
             *first += (rect.height() - self.height(&painter, compact, rect.width())).max(0.0);
         }
@@ -191,9 +202,9 @@ impl Tile {
                     );
                 }
             }
-            Graph::Cells(cells) => {
-                let (cols, _) = graph::cell_grid(cells.len(), rect.width());
-                graph::draw_cells(painter, rect, cells, cols, capacity, self.color);
+            Graph::Cells(cells) => graph::draw_cells(painter, rect, cells, capacity, self.color),
+            Graph::Meter { label, value, max, thresholds, unit } => {
+                graph::draw_meter(painter, rect, label, *value, *max, *thresholds, unit);
             }
         }
     }
