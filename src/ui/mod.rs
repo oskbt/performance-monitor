@@ -199,7 +199,7 @@ fn paging_tile(history: &History) -> Tile {
             .unwrap_or_default(),
         details,
         alert: false,
-        slim: false,
+        slim: true,
     }
 }
 
