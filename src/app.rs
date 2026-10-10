@@ -1,5 +1,6 @@
 //! eframe::App の実装。
 
+use crate::autostart;
 use crate::collector;
 use crate::config::{Config, UPDATE_INTERVALS_MS};
 use crate::history::History;
@@ -25,6 +26,8 @@ pub struct MonitorApp {
     interval_ms: Arc<AtomicU64>,
     /// 全タイルの (ID, タイトル)。「表示項目」メニュー用。
     all_tiles: Vec<(String, String)>,
+    /// Windows 起動時の自動起動。レジストリが正なので設定ファイルには保存しない。
+    autostart: bool,
 }
 
 impl MonitorApp {
@@ -41,7 +44,14 @@ impl MonitorApp {
         let interval_ms = Arc::new(AtomicU64::new(config.update_interval_ms));
         collector::spawn(cc.egui_ctx.clone(), history.clone(), interval_ms.clone());
 
-        Self { config, hwnd, history, interval_ms, all_tiles: Vec::new() }
+        Self {
+            config,
+            hwnd,
+            history,
+            interval_ms,
+            all_tiles: Vec::new(),
+            autostart: autostart::is_enabled(),
+        }
     }
 
     /// 右クリックメニュー。`tile` はメニューを開いたタイルの ID。
@@ -102,6 +112,13 @@ impl MonitorApp {
                 );
             }
         });
+        if ui.checkbox(&mut self.autostart, "Windows 起動時に自動起動").changed() {
+            if let Err(e) = autostart::set_enabled(self.autostart) {
+                log::error!("自動起動の設定に失敗しました: {e}");
+            }
+            // 失敗やタスクマネージャー側の設定も反映するため、レジストリから読み直す
+            self.autostart = autostart::is_enabled();
+        }
         ui.separator();
         if ui.button("終了").clicked() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
