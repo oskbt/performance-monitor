@@ -169,8 +169,10 @@ impl eframe::App for MonitorApp {
                         let tile_w = (avail - TILE_GAP * (cols - 1) as f32) / cols as f32;
 
                         for row in visible.chunks(cols) {
-                            let row_h =
-                                row.iter().map(|t| t.height(compact)).fold(0.0, f32::max);
+                            let row_h = row
+                                .iter()
+                                .map(|t| t.height(ui.painter(), compact, tile_w))
+                                .fold(0.0, f32::max);
                             let (row_rect, _) =
                                 ui.allocate_exact_size(vec2(avail, row_h), egui::Sense::hover());
                             for (i, tile) in row.iter().enumerate() {

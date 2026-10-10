@@ -17,6 +17,12 @@ const GRAPH_H: f32 = 70.0;
 const GRAPH_H_COMPACT: f32 = 34.0;
 const LINE_H: f32 = 16.0;
 const GAP: f32 = 4.0;
+const MARKER_W: f32 = 12.0;
+const LEGEND_SPACING: f32 = 12.0;
+
+fn legend_font() -> FontId {
+    FontId::proportional(12.0)
+}
 
 pub enum Graph {
     /// 1 つのグラフに複数系列を重ねる。`scale` は縦軸上限のラベル。
@@ -41,16 +47,37 @@ pub struct Tile {
 }
 
 impl Tile {
-    pub fn height(&self, compact: bool) -> f32 {
+    /// 幅 `width` で描いたときに必要な高さ。
+    pub fn height(&self, painter: &egui::Painter, compact: bool, width: f32) -> f32 {
         let graphs_h: f32 = self.graph_heights(compact).iter().map(|h| h + GAP).sum();
         let mut h = PAD + HEADER_H + graphs_h - GAP + PAD;
-        if !self.legend.is_empty() {
-            h += GAP + LINE_H;
+        if let Some(rows) = self.legend_layout(painter, width - 2.0 * PAD).last().map(|e| e.0 + 1) {
+            h += GAP + rows as f32 * LINE_H;
         }
         if !compact && !self.details.is_empty() {
             h += self.details.len() as f32 * LINE_H;
         }
         h
+    }
+
+    /// 凡例の各項目の配置 (行, x)。幅に収まらない項目は次の行へ折り返す。
+    fn legend_layout(&self, painter: &egui::Painter, width: f32) -> Vec<(usize, f32)> {
+        let mut row = 0;
+        let mut x = 0.0;
+        self.legend
+            .iter()
+            .map(|(color, text)| {
+                let w = if color.is_some() { MARKER_W } else { 0.0 }
+                    + painter.layout_no_wrap(text.clone(), legend_font(), TEXT).size().x;
+                if x > 0.0 && x + w > width {
+                    row += 1;
+                    x = 0.0;
+                }
+                let pos = (row, x);
+                x += w + LEGEND_SPACING;
+                pos
+            })
+            .collect()
     }
 
     fn graph_heights(&self, compact: bool) -> Vec<f32> {
@@ -100,7 +127,7 @@ impl Tile {
         // グラフ（行の高さが揃えられて余った分は 1 つ目のグラフに回す）
         let mut heights = self.graph_heights(compact);
         if let Some(first) = heights.first_mut() {
-            *first += (rect.height() - self.height(compact)).max(0.0);
+            *first += (rect.height() - self.height(&painter, compact, rect.width())).max(0.0);
         }
         let mut y = inner.top() + HEADER_H;
         for (graph, h) in self.graphs.iter().zip(heights) {
@@ -110,24 +137,19 @@ impl Tile {
         }
 
         // 凡例
-        if !self.legend.is_empty() {
-            let mut x = inner.left();
-            for (color, text) in &self.legend {
-                if let Some(color) = color {
-                    let marker = Rect::from_min_size(egui::pos2(x, y + 4.0), vec2(8.0, 8.0));
-                    painter.rect_filled(marker, 1.0, *color);
-                    x += 12.0;
-                }
-                let galley =
-                    truncated(&painter, text, FontId::proportional(12.0), TEXT, inner.right() - x);
-                let w = galley.size().x;
-                painter.galley(egui::pos2(x, y), galley, TEXT);
-                x += w + 12.0;
-                if x >= inner.right() {
-                    break;
-                }
+        let layout = self.legend_layout(&painter, inner.width());
+        for ((color, text), &(row, x)) in self.legend.iter().zip(&layout) {
+            let mut pos = egui::pos2(inner.left() + x, y + row as f32 * LINE_H);
+            if let Some(color) = color {
+                let marker = Rect::from_min_size(pos + vec2(0.0, 4.0), vec2(8.0, 8.0));
+                painter.rect_filled(marker, 1.0, *color);
+                pos.x += MARKER_W;
             }
-            y += LINE_H;
+            let galley = truncated(&painter, text, legend_font(), TEXT, inner.right() - pos.x);
+            painter.galley(pos, galley, TEXT);
+        }
+        if let Some(&(rows, _)) = layout.last() {
+            y += (rows + 1) as f32 * LINE_H;
         }
 
         // 補助情報

@@ -2,6 +2,7 @@
 
 mod cpu;
 mod disk;
+mod gpu;
 mod memory;
 mod network;
 mod pdh;
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 
 pub use cpu::CpuSample;
 pub use disk::DiskSample;
+pub use gpu::{EngineKind, GpuSample};
 pub use memory::MemorySample;
 pub use network::NetworkSample;
 
@@ -25,12 +27,14 @@ pub struct Snapshot {
     pub memory: Option<MemorySample>,
     pub disks: Vec<DiskSample>,
     pub networks: Vec<NetworkSample>,
+    pub gpus: Vec<GpuSample>,
 }
 
 struct Collectors {
     cpu: Option<cpu::CpuCollector>,
     disk: Option<disk::DiskCollector>,
     network: network::NetworkCollector,
+    gpu: Option<gpu::GpuCollector>,
 }
 
 impl Collectors {
@@ -43,6 +47,9 @@ impl Collectors {
                 .inspect_err(|e| log::error!("ディスク情報を取得できません: {e}"))
                 .ok(),
             network: network::NetworkCollector::new(),
+            gpu: gpu::GpuCollector::new()
+                .inspect_err(|e| log::error!("GPU 情報を取得できません: {e}"))
+                .ok(),
         }
     }
 
@@ -52,6 +59,7 @@ impl Collectors {
             memory: memory::sample(),
             disks: self.disk.as_mut().map(|c| c.sample()).unwrap_or_default(),
             networks: self.network.sample(),
+            gpus: self.gpu.as_mut().map(|c| c.sample()).unwrap_or_default(),
         }
     }
 }
