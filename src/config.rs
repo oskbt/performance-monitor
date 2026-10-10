@@ -13,7 +13,8 @@ pub struct Config {
     pub update_interval_ms: u64,
     pub history_seconds: u64,
     pub always_on_top: bool,
-    pub borderless: bool,
+    /// ウィンドウのサイズと位置を固定する（ドラッグでの移動・リサイズを無効にする）。
+    pub locked: bool,
     pub opacity: f32,
     pub compact: bool,
     pub show_per_core_cpu: bool,
@@ -41,7 +42,7 @@ impl Default for Config {
             update_interval_ms: 1000,
             history_seconds: 60,
             always_on_top: true,
-            borderless: false,
+            locked: false,
             opacity: 1.0,
             compact: false,
             show_per_core_cpu: true,

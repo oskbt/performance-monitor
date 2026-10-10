@@ -2,21 +2,20 @@
 
 use crate::autostart;
 use crate::collector;
+use crate::tray;
 use crate::config::{Config, UPDATE_INTERVALS_MS};
 use crate::history::History;
 use crate::ui::{self, tile::TEXT_DIM};
 use crate::winutil;
-use eframe::egui::{self, Color32, Rect, vec2};
+use eframe::egui::{self, Rect, vec2};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
 
-/// 背景色（ダークテーマ固定）。
-const BG: Color32 = Color32::from_rgb(0x16, 0x18, 0x1c);
 /// 列の最小幅。ウィンドウがこれより狭いと横スクロールになる。
 const MIN_COLUMN_W: f32 = 190.0;
 const TILE_GAP: f32 = 6.0;
-/// 枠なし時にリサイズ操作を受け付けるウィンドウ端の幅。
+/// リサイズ操作を受け付けるウィンドウ端の幅。
 const RESIZE_MARGIN: f32 = 6.0;
 
 pub struct MonitorApp {
@@ -28,6 +27,8 @@ pub struct MonitorApp {
     all_tiles: Vec<(String, String)>,
     /// Windows 起動時の自動起動。レジストリが正なので設定ファイルには保存しない。
     autostart: bool,
+    /// タスクトレイのアイコン。破棄するとトレイから消えるため保持する。
+    _tray: Option<tray_icon::TrayIcon>,
 }
 
 impl MonitorApp {
@@ -40,6 +41,12 @@ impl MonitorApp {
             winutil::restore_window_rect(hwnd, rect);
         }
 
+        let tray = hwnd.and_then(|hwnd| {
+            tray::create(hwnd, cc.egui_ctx.clone())
+                .inspect_err(|e| log::error!("タスクトレイにアイコンを追加できません: {e}"))
+                .ok()
+        });
+
         let history = Arc::new(Mutex::new(History::new(config.history_len())));
         let interval_ms = Arc::new(AtomicU64::new(config.update_interval_ms));
         collector::spawn(cc.egui_ctx.clone(), history.clone(), interval_ms.clone());
@@ -51,6 +58,7 @@ impl MonitorApp {
             interval_ms,
             all_tiles: Vec::new(),
             autostart: autostart::is_enabled(),
+            _tray: tray,
         }
     }
 
@@ -86,6 +94,7 @@ impl MonitorApp {
         ui.checkbox(&mut self.config.compact, "コンパクト表示");
         ui.separator();
 
+        ui.checkbox(&mut self.config.locked, "ウィンドウのサイズと位置を固定");
         if ui.checkbox(&mut self.config.always_on_top, "常に最前面").changed() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(
                 if self.config.always_on_top {
@@ -94,10 +103,6 @@ impl MonitorApp {
                     egui::WindowLevel::Normal
                 },
             ));
-        }
-        if ui.checkbox(&mut self.config.borderless, "枠なし").changed() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Decorations(!self.config.borderless));
         }
         ui.horizontal(|ui| {
             ui.label("不透明度");
@@ -120,6 +125,12 @@ impl MonitorApp {
             self.autostart = autostart::is_enabled();
         }
         ui.separator();
+        if let Some(hwnd) = self.hwnd {
+            if ui.button("タスクトレイに隠す").clicked() {
+                ui.close();
+                winutil::hide(hwnd);
+            }
+        }
         if ui.button("終了").clicked() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -156,21 +167,22 @@ impl eframe::App for MonitorApp {
             .filter(|column| !column.is_empty())
             .collect();
 
-        let resizing = self.config.borderless && handle_borderless_resize(ctx);
+        let locked = self.config.locked;
+        let resizing = !locked && handle_edge_resize(ctx);
         let compact = self.config.compact;
-        let bg = BG.gamma_multiply(self.config.opacity);
+        // 背景は透明にしてタイルだけを見せる
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(bg).inner_margin(TILE_GAP))
+            .frame(egui::Frame::NONE.inner_margin(TILE_GAP))
             .show(ctx, |ui| {
                 ui.set_opacity(self.config.opacity);
 
-                // 背景: 枠なし時のドラッグ移動と右クリックメニュー
+                // 背景: ドラッグでウィンドウ移動、右クリックでメニュー
                 let bg_response = ui.interact(
                     ui.max_rect(),
                     ui.id().with("background"),
                     egui::Sense::click_and_drag(),
                 );
-                if bg_response.drag_started() && self.config.borderless && !resizing {
+                if bg_response.drag_started() && !resizing && !locked {
                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                 }
                 bg_response.context_menu(|ui| self.context_menu(ui, None));
@@ -219,7 +231,7 @@ impl eframe::App for MonitorApp {
                                 let rect = Rect::from_min_size(egui::pos2(x, y), vec2(column_w, h));
                                 y += h + TILE_GAP;
                                 let response = tile.draw(ui, rect, compact, capacity);
-                                if response.drag_started() && self.config.borderless && !resizing {
+                                if response.drag_started() && !resizing && !locked {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                                 }
                                 response.context_menu(|ui| self.context_menu(ui, Some(&tile.id)));
@@ -234,8 +246,8 @@ impl eframe::App for MonitorApp {
     }
 }
 
-/// 枠なしウィンドウの端でのリサイズ。端でマウスを押したら true を返す。
-fn handle_borderless_resize(ctx: &egui::Context) -> bool {
+/// ウィンドウ端でのリサイズ（ヘッダーレスなので自前で処理する）。端でマウスを押したら true を返す。
+fn handle_edge_resize(ctx: &egui::Context) -> bool {
     use egui::{CursorIcon, ResizeDirection as D};
 
     let (pos, rect, pressed) =
