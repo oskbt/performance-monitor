@@ -80,6 +80,7 @@ Windows のタスクマネージャー「パフォーマンス」タブ相当の
 | タイトル | `GPU 0 (NVIDIA GeForce RTX ...)` のように番号とアダプタ名 |
 | グラフ | エンジン種別ごとの使用率時系列: 3D / Copy / Enc（Video Encode）/ Dec（Video Decode）/ Codec（AMD の Video Codec）。存在するエンジンのみ |
 | 温度メーター | GPU 温度を横棒メーターで表示（0〜100℃）。警告しきい値（既定 80℃）以上で黄、危険しきい値（既定 90℃）以上で赤になり、危険時はタイルの枠も赤く強調する。ドライバが報告しない場合は「取得不可」 |
+| ファンメーター | ファン回転数 (RPM) を横棒メーターで表示。上限はドライバが報告する最大回転数（不明なら 3000 RPM）。0 RPM は停止中（低温時にファンを止める準ファンレス動作など）。ドライバが報告しない場合は「取得不可」 |
 | 数値 | 全体使用率 %（各エンジンの最大値。タスクマネージャー準拠）、専用 GPU メモリ 使用 / 総量、共有 GPU メモリ 使用 / 総量 |
 | 備考 | 統合 GPU（Intel/AMD iGPU）も対象。Microsoft Basic Render Driver は除外 |
 
@@ -175,6 +176,7 @@ Windows のタスクマネージャー「パフォーマンス」タブ相当の
 | GPU メモリ | PDH `\GPU Adapter Memory(*)\Dedicated Usage` / `Shared Usage` |
 | GPU 名・総メモリ | DXGI `IDXGIFactory1::EnumAdapters1` → `DXGI_ADAPTER_DESC1`（`AdapterLuid` で PDH のインスタンスと突き合わせ） |
 | GPU 温度 | `D3DKMTOpenAdapterFromLuid` で開いたアダプタに `D3DKMTQueryAdapterInfo(KMTQAITYPE_ADAPTERPERFDATA)` を発行し、`Temperature`（0.1℃ 単位）を取得。タスクマネージャーと同じ方法でベンダーを問わず、管理者権限も不要 |
+| GPU ファン | 同じ `KMTQAITYPE_ADAPTERPERFDATA` の `FanRPM`。最大回転数は `KMTQAITYPE_ADAPTERPERFDATA_CAPS` の `MaxFanRPM` |
 
 - PDH のワイルドカードカウンタは収集のたびにインスタンスが再列挙されるため、デバイスの増減に自動で追従する
 - GPU Engine のインスタンスはプロセスの起動終了で頻繁に増減するため、`PdhGetFormattedCounterArray` で毎回全インスタンスを取得して集計する

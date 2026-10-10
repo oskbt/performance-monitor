@@ -1,9 +1,10 @@
 use super::pdh::{Counter, PdhError, Query};
 use std::collections::HashMap;
 use windows::Wdk::Graphics::Direct3D::{
-    D3DKMT_ADAPTER_PERFDATA, D3DKMT_CLOSEADAPTER, D3DKMT_OPENADAPTERFROMLUID,
-    D3DKMT_QUERYADAPTERINFO, D3DKMTCloseAdapter, D3DKMTOpenAdapterFromLuid,
-    D3DKMTQueryAdapterInfo, KMTQAITYPE_ADAPTERPERFDATA,
+    D3DKMT_ADAPTER_PERFDATA, D3DKMT_ADAPTER_PERFDATACAPS, D3DKMT_CLOSEADAPTER,
+    D3DKMT_OPENADAPTERFROMLUID, D3DKMT_QUERYADAPTERINFO, D3DKMTCloseAdapter,
+    D3DKMTOpenAdapterFromLuid, D3DKMTQueryAdapterInfo, KMTQAITYPE_ADAPTERPERFDATA,
+    KMTQAITYPE_ADAPTERPERFDATA_CAPS, KMTQUERYADAPTERINFOTYPE,
 };
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Dxgi::{
@@ -69,6 +70,10 @@ pub struct GpuSample {
     pub shared_total: u64,
     /// GPU 温度 (℃)。ドライバが報告しない場合は None。
     pub temperature: Option<f32>,
+    /// ファン回転数 (RPM)。ドライバが報告しない場合は None。0 は停止中（準ファンレス動作など）。
+    pub fan_rpm: Option<u32>,
+    /// ファンの最大回転数 (RPM)。不明なら None。
+    pub fan_max_rpm: Option<u32>,
 }
 
 struct Adapter {
@@ -76,12 +81,22 @@ struct Adapter {
     name: String,
     dedicated_total: u64,
     shared_total: u64,
-    /// 温度取得用の D3DKMT アダプタハンドル。
+    /// 温度・ファン取得用の D3DKMT アダプタハンドル。
     kmt: Option<KmtAdapter>,
 }
 
-/// D3DKMT のアダプタハンドル（タスクマネージャーと同じ方法で温度を取得する）。
-struct KmtAdapter(u32);
+/// D3DKMT のアダプタハンドル（タスクマネージャーと同じ方法で温度・ファン回転数を取得する）。
+struct KmtAdapter {
+    handle: u32,
+    /// ドライバが報告するファンの最大回転数。0 ならファン情報は未対応とみなす。
+    max_fan_rpm: u32,
+}
+
+/// D3DKMT から読んだ温度とファン回転数。
+struct KmtPerf {
+    temperature: Option<f32>,
+    fan_rpm: Option<u32>,
+}
 
 impl KmtAdapter {
     fn open(luid: Luid) -> Option<Self> {
@@ -90,27 +105,42 @@ impl KmtAdapter {
             hAdapter: 0,
         };
         unsafe { D3DKMTOpenAdapterFromLuid(&mut open) }.ok().ok()?;
-        Some(Self(open.hAdapter))
+        let mut adapter = Self { handle: open.hAdapter, max_fan_rpm: 0 };
+        let mut caps = D3DKMT_ADAPTER_PERFDATACAPS::default();
+        if adapter.query(KMTQAITYPE_ADAPTERPERFDATA_CAPS, &mut caps) {
+            adapter.max_fan_rpm = caps.MaxFanRPM;
+        }
+        Some(adapter)
     }
 
-    /// 温度 (℃)。ドライバは 0.1℃ 単位で返す。0 は未対応を意味する。
-    fn temperature(&self) -> Option<f32> {
-        let mut data = D3DKMT_ADAPTER_PERFDATA::default();
+    fn query<T>(&self, kind: KMTQUERYADAPTERINFOTYPE, data: &mut T) -> bool {
         let mut query = D3DKMT_QUERYADAPTERINFO {
-            hAdapter: self.0,
-            Type: KMTQAITYPE_ADAPTERPERFDATA,
-            pPrivateDriverData: (&mut data as *mut D3DKMT_ADAPTER_PERFDATA).cast(),
-            PrivateDriverDataSize: size_of::<D3DKMT_ADAPTER_PERFDATA>() as u32,
+            hAdapter: self.handle,
+            Type: kind,
+            pPrivateDriverData: (data as *mut T).cast(),
+            PrivateDriverDataSize: size_of::<T>() as u32,
         };
-        unsafe { D3DKMTQueryAdapterInfo(&mut query) }.ok().ok()?;
-        (data.Temperature > 0).then(|| data.Temperature as f32 / 10.0)
+        unsafe { D3DKMTQueryAdapterInfo(&mut query) }.is_ok()
+    }
+
+    /// 温度はドライバが 0.1℃ 単位で返し、0 は未対応を意味する。
+    fn perf(&self) -> KmtPerf {
+        let mut data = D3DKMT_ADAPTER_PERFDATA::default();
+        if !self.query(KMTQAITYPE_ADAPTERPERFDATA, &mut data) {
+            return KmtPerf { temperature: None, fan_rpm: None };
+        }
+        KmtPerf {
+            temperature: (data.Temperature > 0).then(|| data.Temperature as f32 / 10.0),
+            // 最大回転数が不明でも回っていれば値は信用する
+            fan_rpm: (self.max_fan_rpm > 0 || data.FanRPM > 0).then_some(data.FanRPM),
+        }
     }
 }
 
 impl Drop for KmtAdapter {
     fn drop(&mut self) {
         unsafe {
-            let _ = D3DKMTCloseAdapter(&D3DKMT_CLOSEADAPTER { hAdapter: self.0 });
+            let _ = D3DKMTCloseAdapter(&D3DKMT_CLOSEADAPTER { hAdapter: self.handle });
         }
     }
 }
@@ -173,6 +203,7 @@ impl GpuCollector {
                     engines.into_iter().map(|(k, v)| (k, v as f32)).collect();
                 engines.sort_by_key(|(k, _)| *k);
 
+                let perf = adapter.kmt.as_ref().map(|k| k.perf());
                 GpuSample {
                     luid: adapter.luid,
                     index: index as u32,
@@ -183,7 +214,13 @@ impl GpuCollector {
                     dedicated_total: adapter.dedicated_total,
                     shared_used: shared.get(&adapter.luid).copied().unwrap_or(0),
                     shared_total: adapter.shared_total,
-                    temperature: adapter.kmt.as_ref().and_then(|k| k.temperature()),
+                    temperature: perf.as_ref().and_then(|p| p.temperature),
+                    fan_rpm: perf.as_ref().and_then(|p| p.fan_rpm),
+                    fan_max_rpm: adapter
+                        .kmt
+                        .as_ref()
+                        .map(|k| k.max_fan_rpm)
+                        .filter(|&max| max > 0),
                 }
             })
             .collect()

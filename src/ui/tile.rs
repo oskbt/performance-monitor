@@ -38,8 +38,8 @@ pub enum Graph {
         label: String,
         value: Option<f32>,
         max: f32,
-        /// (警告, 危険) のしきい値。
-        thresholds: (f32, f32),
+        /// (警告, 危険) のしきい値。None なら色は固定。
+        thresholds: Option<(f32, f32)>,
         unit: &'static str,
     },
 }
@@ -207,7 +207,7 @@ impl Tile {
             }
             Graph::Cells(cells) => graph::draw_cells(painter, rect, cells, capacity, self.color),
             Graph::Meter { label, value, max, thresholds, unit } => {
-                graph::draw_meter(painter, rect, label, *value, *max, *thresholds, unit);
+                graph::draw_meter(painter, rect, label, *value, *max, *thresholds, self.color, unit);
             }
         }
     }
