@@ -1,0 +1,45 @@
+# v から始まるタグ（例: v0.1.0）を push すると、Windows でビルドして GitHub Release を作る。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "performance-monitor-${{ github.ref_name }}-windows-x64"
+          New-Item -ItemType Directory -Path "dist/$name" | Out-Null
+          Copy-Item target/release/performance-monitor.exe, LICENSE, README.md "dist/$name/"
+          Copy-Item assets/fonts/OFL.txt "dist/$name/OFL.txt"
+          python tools/third_party_licenses.py "dist/$name/THIRD_PARTY_LICENSES.txt"
+          Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip"
+          (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" |
+            Out-File -Encoding ascii "dist/$name.zip.sha256"
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.zip dist/*.zip.sha256 `
+            --title "${{ github.ref_name }}" `
+            --notes-file .github/release-notes.md

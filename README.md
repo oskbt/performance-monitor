@@ -32,7 +32,14 @@ GPU 温度は警告温度（既定 80℃）で黄、危険温度（既定 90℃�
 - Windows 10（1709 以降）/ Windows 11（x64）
 - GPU の情報は WDDM 2.x 以降のドライバが必要です（タスクマネージャーに GPU が表示される環境なら動きます）
 
-## インストール
+## ダウンロード
+
+[Releases](https://github.com/oskbt/performance-monitor/releases/latest) から `performance-monitor-<バージョン>-windows-x64.zip` をダウンロードして展開し、`performance-monitor.exe` を実行してください。インストールは不要です。
+
+- 初回起動時に「Windows によって PC が保護されました」と表示された場合は、「詳細情報」→「実行」を選んでください（コード署名をしていないため表示されます）。
+- 配布している exe は GitHub Actions でこのリポジトリのソースからビルドしたものです。
+
+## ソースからビルド
 
 [Rust](https://www.rust-lang.org/tools/install)（stable）をインストールしてからビルドします。
 
@@ -93,3 +100,13 @@ history_seconds = 60      # グラフに表示する期間（秒）
 [MIT License](LICENSE)
 
 同梱しているフォント（`assets/fonts/BIZUDPGothic-subset.ttf`）は BIZ UDPGothic のサブセットで、[SIL Open Font License 1.1](assets/fonts/OFL.txt) に従います。
+配布用 zip には、exe に組み込んでいるライブラリ・フォントのライセンス表示（`THIRD_PARTY_LICENSES.txt`、`tools/third_party_licenses.py` で生成）を同梱しています。
+
+### リリース手順（メンテナー向け）
+
+`Cargo.toml` の `version` を上げてコミットし、同じ番号のタグを push すると、GitHub Actions がビルドして Release を作成します。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
