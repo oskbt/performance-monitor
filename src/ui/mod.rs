@@ -288,6 +288,8 @@ fn network_tile(history: &History, id: &str) -> Tile {
 
 /// GPU 温度メーターの上限 (℃)。
 const GPU_TEMP_MAX: f32 = 100.0;
+/// ドライバが最大回転数を報告しない場合のファンメーターの上限 (RPM)。
+const GPU_FAN_MAX_DEFAULT: f32 = 3000.0;
 
 fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) -> Tile {
     let find = |s: &crate::collector::Snapshot| s.gpus.iter().find(|g| g.luid == luid).cloned();
@@ -334,8 +336,18 @@ fn gpu_tile(history: &History, luid: (u32, u32), temp_thresholds: (f32, f32)) ->
                 label: "温度".into(),
                 value: latest.as_ref().and_then(|g| g.temperature),
                 max: GPU_TEMP_MAX,
-                thresholds: temp_thresholds,
+                thresholds: Some(temp_thresholds),
                 unit: "℃",
+            },
+            Graph::Meter {
+                label: "ファン".into(),
+                value: latest.as_ref().and_then(|g| g.fan_rpm).map(|rpm| rpm as f32),
+                max: latest
+                    .as_ref()
+                    .and_then(|g| g.fan_max_rpm)
+                    .map_or(GPU_FAN_MAX_DEFAULT, |max| max as f32),
+                thresholds: None,
+                unit: " RPM",
             },
         ],
         slim: false,

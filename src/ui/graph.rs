@@ -121,7 +121,8 @@ pub fn meter_color(value: f32, warning: f32, danger: f32) -> Color32 {
     }
 }
 
-/// 横棒のメーター。`warning` / `danger` の位置に目盛りを描き、値に応じて色を変える。
+/// 横棒のメーター。`thresholds`（警告, 危険）があればその位置に目盛りを描いて値に応じて色を変え、
+/// 無ければ `color` で描く。
 /// `value` が None なら「取得不可」と表示する。
 pub fn draw_meter(
     painter: &Painter,
@@ -129,15 +130,17 @@ pub fn draw_meter(
     label: &str,
     value: Option<f32>,
     max: f32,
-    (warning, danger): (f32, f32),
+    thresholds: Option<(f32, f32)>,
+    color: Color32,
     unit: &str,
 ) {
     let font = FontId::proportional(11.0);
     let text = Color32::from_rgb(0xf0, 0xf2, 0xf4);
 
     // 数値はバーの右外側に置き、しきい値の目盛りと重ならないようにする
+    let color_of = |v: f32| thresholds.map_or(color, |(w, d)| meter_color(v, w, d));
     let (value_text, value_color) = match value {
-        Some(v) => (format!("{v:.0}{unit}"), meter_color(v, warning, danger)),
+        Some(v) => (format!("{v:.0}{unit}"), color_of(v)),
         None => ("取得不可".to_string(), LABEL),
     };
     let value_galley = painter.layout_no_wrap(value_text, font.clone(), value_color);
@@ -155,10 +158,12 @@ pub fn draw_meter(
     let x_at = |v: f32| bar.left() + bar.width() * (v / max).clamp(0.0, 1.0);
     if let Some(v) = value {
         let fill = Rect::from_min_max(bar.min, pos2(x_at(v), bar.bottom()));
-        painter.rect_filled(fill, 2.0, meter_color(v, warning, danger).gamma_multiply(0.75));
+        painter.rect_filled(fill, 2.0, color_of(v).gamma_multiply(0.75));
     }
-    for (threshold, color) in [(warning, METER_WARNING), (danger, METER_DANGER)] {
-        painter.vline(x_at(threshold), bar.y_range(), Stroke::new(1.0, color));
+    if let Some((warning, danger)) = thresholds {
+        for (threshold, color) in [(warning, METER_WARNING), (danger, METER_DANGER)] {
+            painter.vline(x_at(threshold), bar.y_range(), Stroke::new(1.0, color));
+        }
     }
     painter.text(bar.left_center() + vec2(4.0, 0.0), Align2::LEFT_CENTER, label, font, text);
 }
