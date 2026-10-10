@@ -1,6 +1,6 @@
 [package]
 name = "performance-monitor"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Always-on-top Windows performance monitor showing CPU, memory, GPU, disk and network graphs on a single screen"
 license = "MIT"
